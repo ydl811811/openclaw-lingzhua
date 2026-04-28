@@ -1,0 +1,245 @@
+#!/usr/bin/env python3
+"""
+自动股票监控脚本 - 常驻单例版
+- 常驻运行，30秒间隔检查
+- 单例模式：只允许一个实例
+- PID文件防止重复启动
+"""
+import os
+import urllib.request
+import json
+import time
+from datetime import datetime
+
+PID_FILE = "/tmp/stock_monitor.pid"
+
+# ============ 配置 ============
+FEISHU_BOT_URL = "https://open.feishu.cn/open-apis/bot/v2/hook/fbfd7f01-878c-4ece-80e6-5e7324ab3692"
+FEISHU_SECRET = "9vXyEvLigZ70Ynw1YeUtI"
+
+# 持仓配置（固定止损止盈）
+POSITIONS = {
+    '000783': {'name': '长江证券', 'cost': 7.338, 'qty': 600, 'stop': 6.80, 'take': 8.10},
+    '002230': {'name': '科大讯飞', 'cost': 48.00, 'qty': 100, 'stop': 44.60, 'take': 52.80},
+    # 300781 已于2026-04-24清仓，价格34.33，亏损-5.49%
+    '601088': {'name': '中国神华', 'cost': 46.73, 'qty': 100, 'stop': 43.00, 'take': 52.00},
+    '600900': {'name': '长江电力', 'cost': 26.895, 'qty': 200, 'stop': 25.00, 'take': 30.00, 'note': '高股息水电，长线持有'},
+    # 顺灏股份 已于2026-04-23清仓，价格20.38
+    '603876': {'name': '鼎胜新材', 'cost': 27.226, 'qty': 200, 'stop': 25.30, 'take': 32.00, 'note': '电池铝箔龙头，长线持有，目标35'},
+}
+
+# 大盘指数
+INDICES = {
+    '000001': {'name': '上证指数', 'key_level': 4050, 'support': 4000},
+    '399001': {'name': '深证成指'},
+    '399006': {'name': '创业板指'},
+}
+INDEX_PREFIX = {'000001': 'sh', '399001': 'sz', '399006': 'sz'}
+
+# ============ 函数 ============
+
+def get_realtime(codes):
+    """获取实时数据（腾讯接口）"""
+    prefixed = []
+    for code in codes:
+        if code in INDEX_PREFIX:
+            prefixed.append(f"{INDEX_PREFIX[code]}{code}")
+        elif code.startswith(('0','3')):
+            prefixed.append(f"sz{code}")
+        else:
+            prefixed.append(f"sh{code}")
+    
+    url = f'https://qt.gtimg.cn/q={",".join(prefixed)}'
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+    
+    with urllib.request.urlopen(req, timeout=10) as r:
+        data = r.read().decode('gbk', errors='replace')
+    
+    results = {}
+    for line in data.strip().split('\n'):
+        if '=' not in line:
+            continue
+        key, rest = line.split('=', 1)
+        if '"' not in rest:
+            continue
+        fields = rest.strip('"').split('~')
+        if len(fields) < 35:
+            continue
+        sym = key.replace('v_', '')
+        code = sym[2:]
+        results[code] = {
+            'price': float(fields[3]),
+            'change_pct': float(fields[32]) if fields[32] else 0,
+        }
+    return results
+
+def send_feishu(msg):
+    """发送飞书（带签名验证）"""
+    import hmac
+    import hashlib
+    import base64
+    
+    timestamp = str(int(time.time()))
+    string_to_sign = timestamp + '\n' + FEISHU_SECRET
+    sign = base64.b64encode(hmac.new(string_to_sign.encode(), digestmod=hashlib.sha256).digest()).decode()
+    
+    payload = {"msg_type": "text", "content": {"text": msg}}
+    payload['timestamp'] = timestamp
+    payload['sign'] = sign
+    
+    data = json.dumps(payload).encode('utf-8')
+    req = urllib.request.Request(FEISHU_BOT_URL, data=data, headers={'Content-Type': 'application/json'})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read().decode('utf-8'))
+    except Exception as e:
+        print(f"飞书推送失败: {e}")
+        return None
+
+def write_sharebox_alert(msg):
+    """写入sharebox，让灵爪能收到预警"""
+    try:
+        sharebox_path = "/home/YDL/.openclaw/workspace/claw-communication/sharebox/"
+        os.makedirs(sharebox_path, exist_ok=True)
+        
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"股票预警_灵爪_{timestamp}.txt"
+        filepath = os.path.join(sharebox_path, filename)
+        
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write(msg)
+        
+        print(f"✅ 已写入sharebox: {filename}")
+        return True
+    except Exception as e:
+        print(f"sharebox写入失败: {e}")
+        return False
+
+def is_trading_hours():
+    """检查是否在交易时间"""
+    now = datetime.now()
+    hour, minute = now.hour, now.minute
+    weekday = now.weekday()
+    if weekday >= 5:
+        return False
+    if 9 <= hour < 11 or (hour == 11 and minute <= 30):
+        return True
+    if 13 <= hour < 15:
+        return True
+    return False
+
+def check():
+    """执行检查"""
+    all_codes = list(POSITIONS.keys()) + list(INDICES.keys())
+    results = get_realtime(all_codes)
+    
+    alerts = []
+    
+    # 检查持仓（含自选监控）
+    for code, pos in POSITIONS.items():
+        if code not in results:
+            continue
+        
+        price = results[code]['price']
+        pct = results[code]['change_pct']
+        qty = pos.get('qty', 0)
+        cost = pos['cost']
+        stop = pos['stop']
+        take = pos['take']
+        
+        profit = (price - cost) * qty
+        profit_pct = (price - cost) / cost * 100 if cost > 0 else 0
+        
+        # 有持仓的：检查止损/止盈/浮亏超3%
+        if qty > 0:
+            if price <= stop:
+                alerts.append(f"🚨止损！{pos['name']} 现价{price} ≤ 止损{stop:.2f}")
+            elif price >= take:
+                alerts.append(f"🎯止盈！{pos['name']} 现价{price} ≥ 目标{take:.2f}")
+            elif profit_pct <= -3:
+                alerts.append(f"⚠️浮亏超3%！{pos['name']} {profit_pct:.1f}%")
+        else:
+            # 无持仓（自选监控）：检查是否到买入区间
+            buy_note = pos.get('note', '')
+            if price <= stop:
+                alerts.append(f"🟢买入信号！{pos['name']} 现价{price} ≤ 买入区间{stop:.2f} {buy_note}")
+            elif price >= take:
+                alerts.append(f"🔴价格到目标！{pos['name']} 现价{price} ≥ 目标{take:.2f} {buy_note}")
+    
+    return alerts
+
+def main():
+    import sys
+    sys.stdout.reconfigure(line_buffering=True)  # 即时输出
+    
+    # 单例检查
+    if os.path.exists(PID_FILE):
+        try:
+            old_pid = int(open(PID_FILE).read().strip())
+            os.kill(old_pid, 0)  # 如果存在会成功
+            print(f"已有实例运行 (PID {old_pid})，退出")
+            return
+        except (ProcessLookupError, ValueError, OSError):
+            os.remove(PID_FILE)
+    
+    with open(PID_FILE, 'w') as f:
+        f.write(str(os.getpid()))
+    
+    print(f"启动 PID {os.getpid()}", flush=True)
+    
+    last_alert_time = 0
+    alert_cooldown = 300  # 5分钟冷却
+    
+    while True:
+        try:
+            if not is_trading_hours():
+                time.sleep(300)  # 非交易时间休眠5分钟
+                continue
+            
+            alerts = check()
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            
+            # 大盘指数
+            all_codes = list(INDICES.keys())
+            results = get_realtime(all_codes)
+            index_lines = [f"📊 {timestamp}"]
+            for code, info in INDICES.items():
+                if code in results:
+                    d = results[code]
+                    pct = d['change_pct']
+                    note = ""
+                    if code == '000001':
+                        if d['price'] >= 4050:
+                            note = " ⚠️压力位"
+                        elif d['price'] <= 4000:
+                            note = " ⚠️支撑位"
+                    index_lines.append(f"  {info['name']}: {d['price']} ({pct:+.2f}%){note}")
+            print('\n'.join(index_lines))
+            
+            if alerts:
+                current_time = time.time()
+                if current_time - last_alert_time > alert_cooldown:
+                    msg_lines = [f"⚠️ 预警 {timestamp}\n"]
+                    msg_lines.extend(alerts)
+                    msg = '\n'.join(msg_lines)
+                    print(msg)
+                    send_feishu(msg)  # 飞书通道1
+                    write_sharebox_alert(msg)  # sharebox通道2 - 灵爪专用
+                    last_alert_time = current_time
+                else:
+                    remaining = alert_cooldown - (current_time - last_alert_time)
+                    print(f"⏳ 预警冷却中({remaining:.0f}秒)")
+            else:
+                print(f"✅ [{timestamp}] 持仓正常")
+            
+            time.sleep(30)
+            
+        except KeyboardInterrupt:
+            print("\n监控已停止")
+            break
+        except Exception as e:
+            print(f"错误: {e}")
+            time.sleep(30)
+
+if __name__ == '__main__':
+    main()

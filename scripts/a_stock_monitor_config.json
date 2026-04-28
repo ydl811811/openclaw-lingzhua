@@ -1,0 +1,333 @@
+{
+  "project": "A股突击计划",
+  "version": "2.2",
+  "market_indices": [
+    {
+      "code": "sh000001",
+      "name": "上证指数",
+      "key_level": 4050,
+      "support": 4000
+    },
+    {
+      "code": "sz399001",
+      "name": "深证成指",
+      "key_level": null,
+      "support": null
+    },
+    {
+      "code": "sz399006",
+      "name": "创业板指",
+      "key_level": null,
+      "support": null
+    }
+  ],
+  "start_date": "2026-04-13",
+  "capital": 50000,
+  "target_return": 0.1,
+  "timeframe": "2周",
+  "description": "分为【持仓股票】和【候选股票】两组",
+  "stocks": [
+    {
+      "code": "002475",
+      "name": "立讯精密",
+      "theme": "消费电子",
+      "weight": "候选-等接回",
+      "position": 0,
+      "cost_price": 0,
+      "stop_loss_price": 50,
+      "monitoring": {
+        "enabled": true,
+        "priority": "high",
+        "price_alert_threshold": 0.03,
+        "volume_alert_threshold": 2.0,
+        "stop_loss": -0.05,
+        "action": "候选-等接回",
+        "notes": "已止盈卖出，等回调60-62区间接回"
+      },
+      "buy_range": [
+        60,
+        62
+      ],
+      "target_price": 65
+    },
+    {
+      "code": "002415",
+      "name": "海康威视",
+      "theme": "AI算力/TMT主线",
+      "weight": "持仓",
+      "position": 100,
+      "cost_price": 33.0,
+      "stop_loss_price": 31.5,
+      "monitoring": {
+        "enabled": true,
+        "priority": "high",
+        "price_alert_threshold": 0.02,
+        "volume_alert_threshold": 2.0,
+        "stop_loss": -0.05,
+        "action": "持有",
+        "notes": "AI主线龙头"
+      }
+    },
+    {
+      "code": "002230",
+      "name": "科大讯飞",
+      "theme": "AI算力",
+      "weight": "持仓",
+      "position": 100,
+      "cost_price": 48.0,
+      "stop_loss_price": 45.6,
+      "monitoring": {
+        "enabled": true,
+        "priority": "high",
+        "price_alert_threshold": 0.03,
+        "volume_alert_threshold": 2.0,
+        "stop_loss": -0.05,
+        "action": "持有",
+        "notes": "AI应用龙头"
+      }
+    },
+    {
+      "code": "002940",
+      "name": "昂利康",
+      "theme": "医药",
+      "weight": "候选",
+      "position": 0,
+      "cost_price": 0,
+      "buy_range": [
+        35,
+        38
+      ],
+      "target_price": 43.0,
+      "stop_loss_price": 33.0,
+      "monitoring": {
+        "enabled": true,
+        "priority": "high",
+        "price_alert_threshold": 0.03,
+        "volume_alert_threshold": 2.0,
+        "stop_loss": -0.05,
+        "action": "候选-等回调",
+        "notes": "今日涨停(39.16)，等回调到35-38区间再考虑"
+      }
+    },
+    {
+      "code": "002990",
+      "name": "盛视科技",
+      "theme": "AI应用",
+      "weight": "候选",
+      "position": 0,
+      "cost_price": 0,
+      "buy_range": [
+        45,
+        48
+      ],
+      "target_price": 56.0,
+      "stop_loss_price": 42.0,
+      "monitoring": {
+        "enabled": true,
+        "priority": "high",
+        "price_alert_threshold": 0.03,
+        "volume_alert_threshold": 2.0,
+        "stop_loss": -0.05,
+        "action": "候选-等回调",
+        "notes": "今日涨停(50.95)，等回调到45-48区间再考虑"
+      }
+    },
+    {
+      "code": "605388",
+      "name": "均瑶健康",
+      "theme": "食品饮料",
+      "weight": "持仓",
+      "position": 600,
+      "cost_price": 8.278,
+      "buy_range": [
+        7.5,
+        8.5
+      ],
+      "target_price": 9.8,
+      "stop_loss_price": 7.5,
+      "monitoring": {
+        "enabled": true,
+        "priority": "medium",
+        "price_alert_threshold": 0.03,
+        "volume_alert_threshold": 2.0,
+        "stop_loss": -0.05,
+        "action": "持有-短线",
+        "notes": "已建仓，持仓成本8.278"
+      }
+    },
+    {
+      "code": "600552",
+      "name": "凯盛科技",
+      "theme": "科技材料",
+      "weight": "候选",
+      "position": 0,
+      "cost_price": 0,
+      "buy_range": [
+        12.5,
+        14.0
+      ],
+      "target_price": 16.5,
+      "stop_loss_price": 11.5,
+      "monitoring": {
+        "enabled": true,
+        "priority": "high",
+        "price_alert_threshold": 0.03,
+        "volume_alert_threshold": 2.0,
+        "stop_loss": -0.05,
+        "action": "候选-等回调",
+        "notes": "今日涨停(15.02)，等回调到12.5-14区间再考虑"
+      }
+    },
+    {
+      "code": "002975",
+      "name": "博杰股份",
+      "theme": "科技制造",
+      "weight": "候选",
+      "position": 0,
+      "cost_price": 0,
+      "buy_range": [
+        85,
+        92
+      ],
+      "target_price": 110.0,
+      "stop_loss_price": 80.0,
+      "monitoring": {
+        "enabled": true,
+        "priority": "high",
+        "price_alert_threshold": 0.03,
+        "volume_alert_threshold": 2.0,
+        "stop_loss": -0.05,
+        "action": "候选-等回调",
+        "notes": "今日涨停(99.97)，等回调到85-92区间再考虑"
+      }
+    },
+    {
+      "code": "002866",
+      "name": "传艺科技",
+      "theme": "科技",
+      "weight": "候选",
+      "position": 0,
+      "cost_price": 0,
+      "buy_range": [
+        22,
+        24
+      ],
+      "target_price": 29.0,
+      "stop_loss_price": 20.0,
+      "monitoring": {
+        "enabled": true,
+        "priority": "medium",
+        "price_alert_threshold": 0.03,
+        "volume_alert_threshold": 2.0,
+        "stop_loss": -0.05,
+        "action": "候选-等回调",
+        "notes": "今日涨停(26.39)，等回调到22-24区间再考虑"
+      }
+    },
+    {
+      "name": "晋亿实业",
+      "code": "601002",
+      "theme": "基建铁路",
+      "weight": "候选",
+      "position": 0,
+      "cost_price": 0,
+      "buy_range": [
+        6.3,
+        6.5
+      ],
+      "target_price": 7.2,
+      "stop_loss_price": 6.0
+    },
+    {
+      "name": "溯联股份",
+      "code": "301397",
+      "theme": "汽车零部件",
+      "weight": "候选",
+      "position": 0,
+      "cost_price": 0,
+      "buy_range": [
+        36,
+        37
+      ],
+      "target_price": 42,
+      "stop_loss_price": 35
+    },
+    {
+      "name": "航天动力",
+      "code": "600343",
+      "theme": "军工",
+      "weight": "候选",
+      "position": 0,
+      "cost_price": 0,
+      "buy_range": [
+        35,
+        36
+      ],
+      "target_price": 40,
+      "stop_loss_price": 34
+    }
+  ],
+  "trading_strategy": {
+    "initial_position": 0.2,
+    "target_position": 0.5,
+    "max_position": 0.6,
+    "stop_loss": -0.05,
+    "take_profit": 0.08,
+    "execution_time": "09:15竞价开始",
+    "buy_method": "分批建仓",
+    "batch_ratios": [
+      0.5,
+      0.3,
+      0.2
+    ],
+    "cash_reserve_ratio": 0.5
+  },
+  "monitoring_settings": {
+    "interval_seconds": 30,
+    "max_requests_per_minute": 30,
+    "trading_hours": {
+      "auction": [
+        "09:15",
+        "09:25"
+      ],
+      "morning": [
+        "09:30",
+        "11:30"
+      ],
+      "afternoon": [
+        "13:00",
+        "15:00"
+      ]
+    },
+    "alert_channels": [
+      "file",
+      "feishu_group"
+    ],
+    "log_level": "info",
+    "alert_types": [
+      "price_breakout",
+      "volume_surge",
+      "stop_loss",
+      "buy_signal"
+    ]
+  },
+  "capital_allocation": {
+    "total_capital": 50000,
+    "long_position": 15000,
+    "short_position": 10000,
+    "cash_reserve": 25000
+  },
+  "created_by": "灵爪（小妹）",
+  "created_at": "2026-04-13",
+  "updated_at": "2026-04-19",
+  "data_source": {
+    "primary": "adata_http",
+    "fallback": "tencent_finance",
+    "adata_url": "http://localhost:5000",
+    "adata_alt_url": "http://192.168.31.141:5000",
+    "auto_switch": true,
+    "timeout_seconds": 5
+  },
+  "status": "active",
+  "notes": "v2.2: 更新持仓(3只) + 新增候选(6只)，分为【持仓】和【候选】两组"
+}
