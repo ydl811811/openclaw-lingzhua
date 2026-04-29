@@ -462,6 +462,7 @@ def generate_report():
         cash=f"{positions.get('cash', 0):.2f}",
         
         # 操作计划（暂时留空，待人工填写）
+        assessment='待确认',
         buy_plan='待确认',
         sell_plan='待确认',
         position_advice='待确认',

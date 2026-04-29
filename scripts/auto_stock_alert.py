@@ -4,27 +4,27 @@
 - 常驻运行，30秒间隔检查
 - 单例模式：只允许一个实例
 - PID文件防止重复启动
+- 持仓从交易记录台账读取（动态）
 """
 import os
 import urllib.request
 import json
 import time
+import re
 from datetime import datetime
 
 PID_FILE = "/tmp/stock_monitor.pid"
+TRADING_LEDGER = "/home/YDL/.openclaw/workspace/a_stock_plan/交易记录台账.md"
 
 # ============ 配置 ============
 FEISHU_BOT_URL = "https://open.feishu.cn/open-apis/bot/v2/hook/fbfd7f01-878c-4ece-80e6-5e7324ab3692"
 FEISHU_SECRET = "9vXyEvLigZ70Ynw1YeUtI"
 
-# 持仓配置（固定止损止盈）
-POSITIONS = {
-    '000783': {'name': '长江证券', 'cost': 7.338, 'qty': 600, 'stop': 6.80, 'take': 8.10},
+# 备用持仓配置（当台账读取失败时使用）
+FALLBACK_POSITIONS = {
     '002230': {'name': '科大讯飞', 'cost': 48.00, 'qty': 100, 'stop': 44.60, 'take': 52.80},
-    # 300781 已于2026-04-24清仓，价格34.33，亏损-5.49%
     '601088': {'name': '中国神华', 'cost': 46.73, 'qty': 100, 'stop': 43.00, 'take': 52.00},
     '600900': {'name': '长江电力', 'cost': 26.895, 'qty': 200, 'stop': 25.00, 'take': 30.00, 'note': '高股息水电，长线持有'},
-    # 顺灏股份 已于2026-04-23清仓，价格20.38
     '603876': {'name': '鼎胜新材', 'cost': 27.226, 'qty': 200, 'stop': 25.30, 'take': 32.00, 'note': '电池铝箔龙头，长线持有，目标35'},
 }
 
@@ -38,6 +38,97 @@ INDEX_PREFIX = {'000001': 'sh', '399001': 'sz', '399006': 'sz'}
 
 # ============ 函数 ============
 
+def read_positions_from_ledger():
+    """从交易记录台账读取当前持仓"""
+    positions = {}
+    
+    if not os.path.exists(TRADING_LEDGER):
+        print(f"⚠️ 交易台账不存在: {TRADING_LEDGER}")
+        return FALLBACK_POSITIONS
+    
+    try:
+        with open(TRADING_LEDGER, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # 找到"当前持仓"表格
+        in_position_section = False
+        lines = content.split('\n')
+        
+        for line in lines:
+            # 检测到"当前持仓"标题
+            if '## 当前持仓' in line:
+                in_position_section = True
+                continue
+            
+            # 如果遇到另一个##开头的段落，退出持仓区域
+            if in_position_section and line.strip().startswith('##'):
+                break
+            
+            # 解析表格行
+            if '|' in line and in_position_section:
+                cells = [c.strip() for c in line.split('|')]
+                if len(cells) < 8:
+                    continue
+                
+                # 跳过表头
+                if '股票' in cells[1] or '代码' in cells[1]:
+                    continue
+                
+                # 跳过已卖出的行（包含~~）
+                if '~~' in cells[1]:
+                    continue
+                
+                try:
+                    name = cells[1].replace('**', '')
+                    code = cells[2].replace('**', '')
+                    qty_str = cells[3].replace('**', '').replace('¥', '').replace(',', '')
+                    qty = int(qty_str)
+                    cost_str = cells[4].replace('**', '').replace('¥', '')
+                    cost = float(cost_str)
+                    stop_str = cells[6].replace('**', '').replace('¥', '')
+                    stop = float(stop_str)
+                    take_str = cells[7].replace('**', '').replace('¥', '')
+                    take = float(take_str)
+                    
+                    # 检查状态列
+                    status = cells[8].replace('**', '') if len(cells) > 8 else ''
+                    
+                    # 排除已卖出的（状态包含"卖出"）
+                    if '卖出' in status or '已卖' in status:
+                        continue
+                    
+                    # 解析预警信息（如果有的话）
+                    warning = None
+                    if '预警:' in status:
+                        import re
+                        m = re.search(r'预警:?(\d+\.?\d*)', status)
+                        if m:
+                            warning = float(m.group(1))
+                    
+                    positions[code] = {
+                        'name': name,
+                        'cost': cost,
+                        'qty': qty,
+                        'stop': stop,
+                        'take': take,
+                        'warning': warning,  # 新增预警线（如47元）
+                    }
+                    print(f"  📥 读取持仓: {name} {code} x{qty}")
+                except Exception as e:
+                    pass  # 跳过解析失败的行
+        
+        if positions:
+            print(f"  ✅ 从台账读取到 {len(positions)} 只持仓")
+        else:
+            print(f"  ⚠️ 台账中无有效持仓，使用备用配置")
+            return FALLBACK_POSITIONS
+            
+    except Exception as e:
+        print(f"  ❌ 读取台账失败: {e}")
+        return FALLBACK_POSITIONS
+    
+    return positions
+
 def get_realtime(codes):
     """获取实时数据（腾讯接口）"""
     prefixed = []
@@ -48,6 +139,9 @@ def get_realtime(codes):
             prefixed.append(f"sz{code}")
         else:
             prefixed.append(f"sh{code}")
+    
+    if not prefixed:
+        return {}
     
     url = f'https://qt.gtimg.cn/q={",".join(prefixed)}'
     req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -128,15 +222,15 @@ def is_trading_hours():
         return True
     return False
 
-def check():
+def check(positions):
     """执行检查"""
-    all_codes = list(POSITIONS.keys()) + list(INDICES.keys())
+    all_codes = list(positions.keys()) + list(INDICES.keys())
     results = get_realtime(all_codes)
     
     alerts = []
     
     # 检查持仓（含自选监控）
-    for code, pos in POSITIONS.items():
+    for code, pos in positions.items():
         if code not in results:
             continue
         
@@ -150,8 +244,13 @@ def check():
         profit = (price - cost) * qty
         profit_pct = (price - cost) / cost * 100 if cost > 0 else 0
         
-        # 有持仓的：检查止损/止盈/浮亏超3%
+        # 有持仓的：检查止损/止盈/浮亏超3%/预警线
         if qty > 0:
+            # 检查预警线（如47元支撑）
+            warning = pos.get('warning')
+            if warning and price <= warning:
+                alerts.append(f"⚠️预警！{pos['name']} 现价{price} 接近预警线{warning:.2f}！注意支撑")
+            
             if price <= stop:
                 alerts.append(f"🚨止损！{pos['name']} 现价{price} ≤ 止损{stop:.2f}")
             elif price >= take:
@@ -189,14 +288,24 @@ def main():
     
     last_alert_time = 0
     alert_cooldown = 300  # 5分钟冷却
+    last_position_read = 0
+    positions = FALLBACK_POSITIONS
+    position_refresh_interval = 300  # 每5分钟重新读取持仓
     
     while True:
         try:
+            # 每5分钟重新读取持仓
+            current_time = time.time()
+            if current_time - last_position_read > position_refresh_interval:
+                print(f"\n🔄 [{datetime.now().strftime('%H:%M:%S')}] 重新读取交易台账...")
+                positions = read_positions_from_ledger()
+                last_position_read = current_time
+            
             if not is_trading_hours():
                 time.sleep(300)  # 非交易时间休眠5分钟
                 continue
             
-            alerts = check()
+            alerts = check(positions)
             timestamp = datetime.now().strftime("%H:%M:%S")
             
             # 大盘指数
@@ -217,7 +326,6 @@ def main():
             print('\n'.join(index_lines))
             
             if alerts:
-                current_time = time.time()
                 if current_time - last_alert_time > alert_cooldown:
                     msg_lines = [f"⚠️ 预警 {timestamp}\n"]
                     msg_lines.extend(alerts)
