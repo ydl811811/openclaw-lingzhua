@@ -21,12 +21,10 @@ CACHE_DIR = "/home/YDL/.openclaw/agent_stock_work/cache_temp"
 FEISHU_BOT_URL = "https://open.feishu.cn/open-apis/bot/v2/hook/fbfd7f01-878c-4ece-80e6-5e7324ab3692"
 FEISHU_SECRET = "9vXyEvLigZ70Ynw1YeUtI"
 
-# ============ 持仓配置 ============
+# ============ 持仓配置（自动从台账读取）============
 POSITIONS = {
-    '000783': {'name': '长江证券', 'cost': 7.338, 'qty': 600, 'stop': 6.80, 'take': 8.10, 'market': 'sz'},
-    '002230': {'name': '科大讯飞', 'cost': 48.00, 'qty': 100, 'stop': 44.60, 'take': 52.80, 'market': 'sz'},
-    '601088': {'name': '中国神华', 'cost': 46.73, 'qty': 100, 'stop': 43.00, 'take': 52.00, 'market': 'sh'},
     '600900': {'name': '长江电力', 'cost': 26.895, 'qty': 200, 'stop': 25.00, 'take': 30.00, 'market': 'sh'},
+    '603876': {'name': '鼎胜新材', 'cost': 27.226, 'qty': 200, 'stop': 25.30, 'take': 32.00, 'market': 'sh'},
 }
 
 # ============ 数据获取 ============
@@ -46,17 +44,19 @@ def get_kline(ts_code, days=20):
         return None
 
 def get_index_data():
+    """获取上证指数数据（通过龙爪adata）"""
+    import subprocess
     try:
-        pro = get_tushare()
-        start = (date.today() - timedelta(days=5)).strftime('%Y%m%d')
-        end = date.today().strftime('%Y%m%d')
-        df = pro.index_daily(ts_code='000001.SH', start_date=start, end_date=end)
-        if df is not None and len(df) >= 2:
-            latest = df.iloc[-1]
-            return {
-                'close': latest.get('close', 0),
-                'pct': latest.get('pct_chg', 0),
-            }
+        cmd = ['ssh', '-i', '/home/YDL/.ssh/id_ed25519', '-o', 'StrictHostKeyChecking=no',
+               'yu@192.168.31.141',
+               '/usr/bin/python3.12 /home/yu/.hermes/skills/adata-stock-data/scripts/fetch_data.py index-kline 000001 2']
+        output = subprocess.check_output(cmd, timeout=15).decode('utf-8', errors='replace')
+        lines = [l for l in output.strip().split('\n') if l and not l.startswith('trade_date')]
+        if lines:
+            parts = lines[-1].split()
+            # 格式: trade_date open close high low change change_pct (7列)
+            if len(parts) >= 7:
+                return {'close': float(parts[2]), 'pct': float(parts[6])}
     except:
         pass
     return {'close': 0, 'pct': 0}

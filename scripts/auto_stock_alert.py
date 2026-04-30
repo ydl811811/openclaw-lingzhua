@@ -22,10 +22,9 @@ FEISHU_SECRET = "9vXyEvLigZ70Ynw1YeUtI"
 
 # 备用持仓配置（当台账读取失败时使用）
 FALLBACK_POSITIONS = {
-    '002230': {'name': '科大讯飞', 'cost': 48.00, 'qty': 100, 'stop': 44.60, 'take': 52.80},
-    '601088': {'name': '中国神华', 'cost': 46.73, 'qty': 100, 'stop': 43.00, 'take': 52.00},
-    '600900': {'name': '长江电力', 'cost': 26.895, 'qty': 200, 'stop': 25.00, 'take': 30.00, 'note': '高股息水电，长线持有'},
-    '603876': {'name': '鼎胜新材', 'cost': 27.226, 'qty': 200, 'stop': 25.30, 'take': 32.00, 'note': '电池铝箔龙头，长线持有，目标35'},
+    '600900': {'name': '长江电力', 'cost': 26.895, 'qty': 200, 'stop': 25.00, 'take': 30.00, 'reduce': 26.50, 'add': 25.50, 'breakout_add': 28.50, 'note': '高股息水电，长线持有'},
+    '603876': {'name': '鼎胜新材', 'cost': 27.226, 'qty': 200, 'stop': 25.30, 'take': 32.00, 'reduce': 28.00, 'add': 25.80, 'breakout_add': 30.00, 'note': '电池铝箔龙头，长线持有'},
+    '300613': {'name': '富瀚微', 'cost': 58.22, 'qty': 100, 'stop': 54.00, 'take': 72.00, 'reduce': 56.00, 'add': None, 'breakout_add': 63.88, 'note': '半导体/AI，短线博弈'},
 }
 
 # 大盘指数
@@ -244,17 +243,28 @@ def check(positions):
         profit = (price - cost) * qty
         profit_pct = (price - cost) / cost * 100 if cost > 0 else 0
         
-        # 有持仓的：检查止损/止盈/浮亏超3%/预警线
+        # 有持仓的：检查止损/止盈/减仓/加仓/突破加仓
         if qty > 0:
-            # 检查预警线（如47元支撑）
-            warning = pos.get('warning')
-            if warning and price <= warning:
-                alerts.append(f"⚠️预警！{pos['name']} 现价{price} 接近预警线{warning:.2f}！注意支撑")
+            reduce_price = pos.get('reduce')
+            add_price = pos.get('add')
+            breakout_add = pos.get('breakout_add')
             
+            # 止损（最优先）
             if price <= stop:
                 alerts.append(f"🚨止损！{pos['name']} 现价{price} ≤ 止损{stop:.2f}")
+            # 止盈
             elif price >= take:
                 alerts.append(f"🎯止盈！{pos['name']} 现价{price} ≥ 目标{take:.2f}")
+            # 减仓提醒（跌破减仓位但未到止损）
+            elif reduce_price and price <= reduce_price:
+                alerts.append(f"📍减仓提醒！{pos['name']} 现价{price} ≤ 减仓线{reduce_price:.2f}，建议减仓50%")
+            # 突破加仓机会（追涨，突破前高/压力位）
+            elif breakout_add and price >= breakout_add:
+                alerts.append(f"🚀突破加仓！{pos['name']} 现价{price} ≥ 突破线{breakout_add:.2f}，可考虑加仓30%")
+            # 回调加仓机会（低吸，跌到支撑位）
+            elif add_price and price <= add_price:
+                alerts.append(f"📥加仓机会！{pos['name']} 现价{price} ≤ 加仓线{add_price:.2f}，可考虑加仓")
+            # 浮亏超3%
             elif profit_pct <= -3:
                 alerts.append(f"⚠️浮亏超3%！{pos['name']} {profit_pct:.1f}%")
         else:

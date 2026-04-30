@@ -134,8 +134,53 @@ def get_us_market():
     return result
 
 
+def get_index_data_remote():
+    """通过SSH获取昨日指数数据（从龙爪的adata库）"""
+    import subprocess
+    result = {
+        'sh_close': '-', 'sh_chg': '-',
+        'sz_close': '-', 'sz_chg': '-',
+        'cy_close': '-', 'cy_chg': '-',
+    }
+    try:
+        # 获取上证数据
+        cmd = ['ssh', '-i', '/home/YDL/.ssh/id_ed25519', '-o', 'StrictHostKeyChecking=no',
+               'yu@192.168.31.141',
+               '/usr/bin/python3.12 /home/yu/.hermes/skills/adata-stock-data/scripts/fetch_data.py index-kline 000001 3']
+        output = subprocess.check_output(cmd, timeout=15).decode('utf-8', errors='replace')
+        lines = [l for l in output.strip().split('\n') if l and not l.startswith('trade_date')]
+        if lines:
+            parts = lines[-1].split()
+            # 格式: trade_date open close high low change change_pct (7列)
+            if len(parts) >= 7:
+                result['sh_close'] = parts[2]
+                result['sh_chg'] = f"{parts[6]}%"
+
+        # 获取深证数据
+        cmd[-1] = '/usr/bin/python3.12 /home/yu/.hermes/skills/adata-stock-data/scripts/fetch_data.py index-kline 399001 3'
+        output = subprocess.check_output(cmd, timeout=15).decode('utf-8', errors='replace')
+        lines = [l for l in output.strip().split('\n') if l and not l.startswith('trade_date')]
+        if lines:
+            parts = lines[-1].split()
+            if len(parts) >= 7:
+                result['sz_close'] = parts[2]
+                result['sz_chg'] = f"{parts[6]}%"
+
+        # 获取创业板数据
+        cmd[-1] = '/usr/bin/python3.12 /home/yu/.hermes/skills/adata-stock-data/scripts/fetch_data.py index-kline 399006 3'
+        output = subprocess.check_output(cmd, timeout=15).decode('utf-8', errors='replace')
+        lines = [l for l in output.strip().split('\n') if l and not l.startswith('trade_date')]
+        if lines:
+            parts = lines[-1].split()
+            if len(parts) >= 7:
+                result['cy_close'] = parts[2]
+                result['cy_chg'] = f"{parts[6]}%"
+    except Exception as e:
+        print(f"  SSH获取指数数据失败: {e}")
+    return result
+
 def get_yesterday_summary():
-    """获取昨日市场总结（从复盘报告读取）"""
+    """获取昨日市场总结（优先从复盘报告，失败则从adata获取）"""
     yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
     review_file = f"{CANDIDATE_POOL_DIR}/{yesterday}/post_market_review.md"
     
@@ -157,13 +202,13 @@ def get_yesterday_summary():
         'dragon_tiger': '暂无数据',
     }
     
+    # 尝试从复盘报告读取
     if os.path.exists(review_file):
         try:
             with open(review_file, 'r', encoding='utf-8') as f:
                 content = f.read()
             
             # 解析上证/深证/创业板数据
-            # 格式: | 上证指数 | 4106.26 | +0.52% | ... |
             for line in content.split('\n'):
                 if '|' in line and ('上证' in line or '深证' in line or '创业板' in line):
                     cells = [c.strip() for c in line.split('|')]
@@ -179,7 +224,6 @@ def get_yesterday_summary():
                             result['cy_chg'] = cells[3]
             
             # 解析成交额
-            # 格式: - **上证成交额**: 约1.09万亿（10936亿元）
             for line in content.split('\n'):
                 if '上证成交额' in line:
                     m = re.search(r'（(\d+)亿元）', line)
@@ -190,12 +234,20 @@ def get_yesterday_summary():
                     if m:
                         result['sz_vol'] = m.group(1)
             
-            print(f"  昨日指数: 上证{result['sh_close']}({result['sh_chg']})")
+            print(f"  昨日指数(复盘报告): 上证{result['sh_close']}({result['sh_chg']})")
             
         except Exception as e:
             print(f"  读取复盘报告失败: {e}")
     else:
         print(f"  复盘报告不存在: {review_file}")
+    
+    # 如果复盘报告数据不完整，从adata获取
+    if result['sh_close'] == '-' or result['sh_chg'] == '-':
+        print("  复盘报告指数数据不完整，尝试从adata获取...")
+        remote_data = get_index_data_remote()
+        if remote_data['sh_close'] != '-':
+            result.update(remote_data)
+            print(f"  昨日指数(adata): 上证{result['sh_close']}({result['sh_chg']})")
     
     return result
 
