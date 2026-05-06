@@ -23,7 +23,7 @@ FEISHU_SECRET = "9vXyEvLigZ70Ynw1YeUtI"
 # 备用持仓配置（当台账读取失败时使用）
 FALLBACK_POSITIONS = {
     '600900': {'name': '长江电力', 'cost': 26.895, 'qty': 200, 'stop': 25.00, 'take': 30.00, 'reduce': 26.50, 'add': 25.50, 'breakout_add': 28.50, 'note': '高股息水电，长线持有'},
-    '603876': {'name': '鼎胜新材', 'cost': 27.226, 'qty': 200, 'stop': 25.30, 'take': 32.00, 'reduce': 28.00, 'add': 25.80, 'breakout_add': 30.00, 'note': '电池铝箔龙头，长线持有'},
+    '603876': {'name': '鼎胜新材', 'cost': 27.226, 'qty': 100, 'stop': 29.50, 'take': 35.00, 'take2': None, 'reduce': 30.00, 'add': None, 'breakout_add': None, 'note': '电池铝箔龙头，第1目标32已卖出半仓，剩余100股目标35'},
     '300613': {'name': '富瀚微', 'cost': 58.22, 'qty': 100, 'stop': 54.00, 'take': 72.00, 'reduce': 56.00, 'add': None, 'breakout_add': 63.88, 'note': '半导体/AI，短线博弈'},
 }
 
