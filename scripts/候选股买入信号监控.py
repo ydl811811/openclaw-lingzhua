@@ -17,8 +17,45 @@ PID_FILE = "/tmp/watchlist_monitor.pid"
 VOLUME_FILE = "/tmp/watchlist_volume.json"
 
 # ============ 成交量数据管理 ============
+def get_volume_from_sina(codes):
+    """通过新浪财经接口获取今日成交量数据（更稳定）"""
+    import requests
+    import re
+    try:
+        prefixed = []
+        for code in codes:
+            if code.startswith(('5', '6', '7', '9')):
+                prefixed.append(f"sh{code}")
+            else:
+                prefixed.append(f"sz{code}")
+        
+        url = f'http://hq.sinajs.cn/list={",".join(prefixed)}'
+        headers = {'User-Agent': 'Mozilla/5.0', 'Referer': 'http://finance.sina.com.cn/'}
+        resp = requests.get(url, headers=headers, timeout=10)
+        resp.encoding = 'gbk'
+        
+        volumes = {}
+        for line in resp.text.split('\n'):
+            m = re.search(r'hq_str_(\w+)="(.+?)"', line)
+            if not m:
+                continue
+            code_raw = m.group(1).replace('sh', '').replace('sz', '')
+            content = m.group(2)
+            parts = content.split(',')
+            if len(parts) >= 9:
+                try:
+                    # 新浪数据格式: parts[8] = 成交量(股)
+                    volume_shares = int(parts[8])
+                    volumes[code_raw] = volume_shares
+                except:
+                    pass
+        return volumes
+    except Exception as e:
+        print(f"[SinaVol] 获取成交量失败: {e}")
+        return {}
+
 def get_volume_from_adata(codes):
-    """通过adata API获取今日成交量数据"""
+    """通过adata API获取今日成交量数据（备用）"""
     try:
         cmd = f'/usr/bin/python3.12 /home/yu/.hermes/skills/adata-stock-data/scripts/fetch_data.py realtime {" ".join(codes)}'
         result = subprocess.run(
@@ -28,51 +65,47 @@ def get_volume_from_adata(codes):
         )
         volumes = {}
         for line in result.stdout.strip().split('\n'):
-            if line.startswith('stock_code') or not line.strip():
+            line = line.strip()  # 去除前后空格
+            if line.startswith('stock_code') or not line:
                 continue
             parts = line.split()
             if len(parts) >= 6:
                 code = parts[0]
                 try:
-                    volume = int(parts[4])  # volume is at index 4
+                    volume = int(parts[5])  # volume is at index 5
                     volumes[code] = volume
                 except:
                     pass
         return volumes
     except Exception as e:
-        print(f"获取成交量失败: {e}")
+        print(f"[AdataVol] 获取成交量失败: {e}")
         return {}
 
 def get_5day_avg_volume(codes):
-    """通过adata API获取前5个交易日均量（用于缩量判断）"""
+    """通过新浪财经接口获取前5个交易日均量（用于缩量判断，更稳定）"""
+    import requests
+    import json
     avg_volumes = {}
     try:
         for code in codes:
-            # 获取日K线数据（过去5-10天，取5个交易日）
-            cmd = f'/usr/bin/python3.12 /home/yu/.hermes/skills/adata-stock-data/scripts/fetch_data.py kline {code} 10'
-            proc = subprocess.run(
-                ['ssh', '-i', '/home/YDL/.ssh/id_ed25519', '-o', 'StrictHostKeyChecking=no',
-                 'yu@192.168.31.141', cmd],
-                capture_output=True, text=True, timeout=30
-            )
-            volumes = []
-            for line in proc.stdout.strip().split('\n'):
-                if line.startswith('trade_date') or not line.strip():
-                    continue
-                parts = line.split()
-                if len(parts) >= 6:
-                    try:
-                        vol = int(float(parts[5]))  # volume字段（可能是浮点数）
-                        volumes.append(vol)
-                    except:
-                        pass
-            # 取最后5个交易日的成交量（排除今天，因为今天的K线可能还没走完）
-            if len(volumes) >= 5:
-                past_5_days = volumes[:5]
-                avg_vol = sum(past_5_days) / 5
-                avg_volumes[code] = avg_vol
+            try:
+                # 新浪财经K线接口
+                symbol = f'sz{code}' if not code.startswith(('5', '6', '7', '9')) else f'sh{code}'
+                url = f'http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol={symbol}&scale=240&ma=5'
+                resp = requests.get(url, timeout=10)
+                data = json.loads(resp.text)
+                
+                if data and len(data) > 0:
+                    # 取最新的5日均量数据（ma_volume5字段）
+                    latest = data[-1]
+                    ma_vol = float(latest.get('ma_volume5', 0))
+                    if ma_vol > 0:
+                        avg_volumes[code] = ma_vol
+            except Exception as e:
+                print(f"[SinaKline] 获取{code}均量失败: {e}")
+                continue
     except Exception as e:
-        print(f"获取5日均量失败: {e}")
+        print(f"[SinaKline] 获取均量失败: {e}")
     return avg_volumes
 
 def load_previous_volume():
@@ -111,19 +144,24 @@ FEISHU_BOT_URL = "https://open.feishu.cn/open-apis/bot/v2/hook/fbfd7f01-878c-4ec
 FEISHU_SECRET = "9vXyEvLigZ70Ynw1YeUtI"
 
 # 自选股池（未建仓，等待买入提醒）
-# === 04-24 候选池（老大精选）+ 04-27 新增 ===
+# === 2026-05-07 持仓更新：已持仓移出候选池，添加持仓监控 ===
 WATCHLIST = {
-    '002240': {'name': '盛新锂能', 'buy_low': 50.00, 'buy_high': 53.00, 'stop': 47.00, 'note': '锂电上游，长线轨入选，新能源爆发，目标60-65，仓位20-30%'},
-    '002475': {'name': '立讯精密', 'buy_low': 67.00, 'buy_high': 69.00, 'stop': 65.50, 'note': '消费电子苹果链，建议68元以下买，激进可以在67-69区间买，目标74-75'},
-    '301510': {'name': '固高科技', 'buy_low': 37.50, 'buy_high': 38.50, 'stop': 36.50, 'note': '机器人运动控制，建议37.5-38区间买，目标42-43'},
-    '002810': {'name': '山东赫达', 'buy_low': 25.50, 'buy_high': 26.00, 'stop': 24.50, 'note': '植物胶囊龙头，建议25.5-26区间分批买（深度分析：主力出货，等缩量企稳），目标30（已回调）'},
-    '300552': {'name': '万集科技', 'buy_low': 26.00, 'buy_high': 27.00, 'stop': 24.50, 'note': 'AI基础设施/ETC，业绩增速606%，ROE4.82%优，等回调26-27区间，目标32-33'},
-    '300400': {'name': '劲拓股份', 'buy_low': 25.00, 'buy_high': 26.00, 'stop': 23.50, 'note': '自动化设备/SMT，业绩增速439%，等回调25-26区间，目标30-31'},
-    # 富瀚微(300613) 已于2026-04-30建仓持有，移出候选池
-    # 603876 已于2026-04-27建仓持有，移出候选池
-    # 株冶集团(600961) 高管闪辞+筹码混乱，移出（2026-04-27）
-    # 美新科技(301588) 纯资金炒作，估值偏高，移出（2026-04-27）
-    # 金螳螂(002081) 高危！纯题材炒作崩盘，移出（2026-04-27）
+    '002240': {'name': '盛新锂能', 'buy_low': 57.00, 'buy_high': 58.50, 'stop': 55.00, 'note': '等回调到57-58.5区间，目标62-65，止损55'},
+    '002475': {'name': '立讯精密', 'buy_low': 68.50, 'buy_high': 70.50, 'stop': 67.00, 'note': '等回调68.5-70区间买，目标74-76，止损67'},
+    '301510': {'name': '固高科技', 'buy_low': 39.00, 'buy_high': 41.00, 'stop': 38.50, 'note': '等回调39-40区间，目标43-45，止损38.5'},
+    '002810': {'name': '山东赫达', 'buy_low': 26.50, 'buy_high': 28.00, 'stop': 25.50, 'note': '26.5-28区间，目标30-32，止损25.5'},
+    '300552': {'name': '万集科技', 'buy_low': 26.50, 'buy_high': 27.50, 'stop': 26.00, 'note': 'AI基础设施/ETC，业绩增速606%，目标30-32，止损26'},
+    '300400': {'name': '劲拓股份', 'buy_low': 27.50, 'buy_high': 29.00, 'stop': 27.00, 'note': '等回调27.5-28.5，目标32-35，止损27'},
+    '002837': {'name': '英维克', 'buy_low': 98.00, 'buy_high': 102.00, 'stop': 92.00, 'note': '⭐AIDC翻倍股！液冷龙头，UBS目标160元！目标150+，止损92'},
+}
+
+# ============ 已持仓监控（止损+潜在加仓区间）============
+# 这些是我们已买入的股票，监控是否触发止损或加仓机会
+HOLDINGS = {
+    '600900': {'name': '长江电力', 'cost': 26.895, 'stop': 25.00, 'target': 30.00, 'note': '🟢高股息长线持有，止损25，目标30'},
+    '603876': {'name': '鼎胜新材', 'cost': 29.163, 'stop': 29.50, 'target': 35.00, 'note': '✅05-07接回100股@31.10，综合成本29.163。止损29.5，目标35。加仓区间28.5-29'},
+    '300613': {'name': '富瀚微', 'cost': 58.22, 'stop': 54.00, 'target': 72.00, 'note': '🟢半导体/AI主线，止损54，目标72'},
+    '600845': {'name': '宝信软件', 'cost': 23.861, 'stop': 22.00, 'target': 30.00, 'note': '⭐AIDC翻倍股，IDC纯正标的。止损22，目标30-35。加仓区间23-23.5'},
 }
 
 # ============ 函数 ============
@@ -221,8 +259,11 @@ def check_watchlist():
     codes = list(WATCHLIST.keys())
     quotes = get_realtime(codes)
     
-    # 获取成交量数据
-    volumes = get_volume_from_adata(codes)
+    # 获取成交量数据（优先使用新浪接口，更稳定）
+    volumes = get_volume_from_sina(codes)
+    if not volumes:  # 如果新浪接口失败，尝试adata接口
+        print("[Warn] Sina volume failed, trying adata...")
+        volumes = get_volume_from_adata(codes)
     avg_volumes = get_5day_avg_volume(codes)  # 使用5日均量
     
     alerts = []
