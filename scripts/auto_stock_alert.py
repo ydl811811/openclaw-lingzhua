@@ -22,11 +22,9 @@ FEISHU_SECRET = "9vXyEvLigZ70Ynw1YeUtI"
 
 # 备用持仓配置（当台账读取失败时使用）
 FALLBACK_POSITIONS = {
-    '600900': {'name': '长江电力', 'cost': 26.895, 'qty': 200, 'stop': 25.00, 'take': 30.00, 'reduce': 26.50, 'add': 25.50, 'breakout_add': 28.50, 'note': '高股息水电，长线持有'},
-    '603876': {'name': '鼎胜新材', 'cost': 31.10, 'qty': 100, 'stop': 27.50, 'take': 35.00, 'reduce': 29.00, 'add': None, 'breakout_add': None, 'note': '电池铝箔，跌破27.50清仓'},
-    '300613': {'name': '富瀚微', 'cost': 58.22, 'qty': 100, 'stop': 54.00, 'take': 72.00, 'reduce': 56.00, 'add': None, 'breakout_add': 63.88, 'note': '半导体/AI，半导体主线'},
-    '600845': {'name': '宝信软件', 'cost': 23.755, 'qty': 200, 'stop': 22.00, 'take': 30.00, 'reduce': None, 'add': None, 'breakout_add': None, 'note': 'AIDC翻倍股，IDC纯正标的'},
-    '300552': {'name': '万集科技', 'cost': 28.55, 'qty': 100, 'stop': 24.50, 'take': 32.00, 'reduce': None, 'add': None, 'breakout_add': None, 'note': 'AI基础设施/ETC，业绩增速606%'},
+    '600900': {'name': '长江电力', 'cost': 27.02, 'qty': 400, 'stop': 25.00, 'take': 30.00, 'reduce': 26.50, 'add': 25.50, 'breakout_add': 28.50, 'note': '高股息水电，长线持有'},
+    '603876': {'name': '鼎胜新材', 'cost': 25.831, 'qty': 100, 'stop': 27.50, 'take': 35.00, 'reduce': 29.00, 'add': None, 'breakout_add': None, 'note': '电池铝箔，跌破27.50清仓，持有等解套'},
+    '300552': {'name': '万集科技', 'cost': 28.575, 'qty': 100, 'stop': 24.50, 'take': 32.00, 'reduce': None, 'add': None, 'breakout_add': None, 'note': 'AI基础设施/ETC，业绩增速606%，持有100股等解套'},
 }
 
 # 大盘指数

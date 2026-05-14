@@ -506,3 +506,18 @@ find cache_temp/ -type f -mtime +7 -delete
 - `north` - 北向资金
 
 **前提**：龙爪的Hermes必须运行中
+
+## 📋 待办任务 - 2026-05-14
+
+### lossless-claw-enhanced GitHub Issue（今晚做）
+- **任务**：向 win4r/lossless-claw-enhanced 仓库提Issue或PR
+- **内容**：建议在 openclaw.plugin.json 中添加 contracts.tools 声明
+- **需要的tools**：
+  - lcm_grep
+  - lcm_describe
+  - lcm_expand
+  - lcm_expand_query
+- **当前状态**：本地已修复，但仓库未更新
+- **仓库**：https://github.com/win4r/lossless-claw-enhanced
+- **执行时间**：今晚（老大安排）
+
