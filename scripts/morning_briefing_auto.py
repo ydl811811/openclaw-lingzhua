@@ -316,7 +316,10 @@ def get_positions():
                 continue
             
             # 检查是否是持仓行（包含数字和状态标记）
-            if any('持有' in c or '关注' in c or '短线' in c for c in cells):
+            # 匹配条件：包含'持有'/'关注'/'短线'关键词 OR 包含🟢/🟡/🟠状态emoji
+            has_status_emoji = any(c in ('🟢', '🟡', '🟠') for c in cells)
+            has_status_keyword = any('持有' in c or '关注' in c or '短线' in c for c in cells)
+            if has_status_emoji or has_status_keyword:
                 # 跳过表头
                 if '股票' in cells[1] or '代码' in cells[1]:
                     continue

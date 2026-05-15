@@ -331,6 +331,25 @@ vim auto_stock_alert.py
 echo "更新说明" >> archive/2026-04/更新记录.md
 ```
 
+### ⭐ 更新台账后必须重启监控脚本
+**原则**：更新交易记录台账后，必须重启 `auto_stock_alert.py` 持仓监控脚本
+
+**原因**：脚本启动时会读取台账并缓存数据，后续不会再重新读取
+
+**操作**：
+```bash
+# 1. 找到进程
+ps aux | grep auto_stock_alert | grep -v grep
+
+# 2. 重启
+kill <PID>
+cd /home/YDL/.openclaw/workspace/scripts
+nohup python3 auto_stock_alert.py > /dev/null 2>&1 &
+
+# 3. 验证
+tail -5 /home/YDL/.openclaw/workspace/logs/stock_monitor.log
+```
+
 
 ### 定期清理旧文件原则
 **周期**：每周清理一次（暂定每周五收盘后）
@@ -398,6 +417,16 @@ find cache_temp/ -type f -mtime +7 -delete
 2. **API失败去网页** - 接口不行就去爬网页
 3. **多试几种方法** - 不要轻易放弃
 4. **主动而不是等待** - 遇到问题先自己想办法，再问
+
+### 历史K线获取优先使用tushare（2026-05-15 新增）
+**问题**：之前用龙爪的adata接口获取K线，很多股票显示"无数据"
+
+**原则**：
+- **首选**：tushare接口（数据覆盖广、稳定）
+- **备选**：adata接口（仅作为补充）
+- **原因**：tushare数据更完整，特别是历史K线
+
+**记忆**：龙爪adata → K线数据不全 → 改用tushare
 
 ### 记住
 - 豆包能做到的，我也要能做到
@@ -506,6 +535,38 @@ find cache_temp/ -type f -mtime +7 -delete
 - `north` - 北向资金
 
 **前提**：龙爪的Hermes必须运行中
+
+## 🤖 子Agent系统（2026-05-15 新增）
+
+### 架构设计
+```
+灵爪（主控）
+    ├── 风控Agent → 持仓监控、止损提醒、仓位管理
+    └── 市场分析Agent → 选股分析、晨报、天时判断
+```
+
+### 创建方式
+使用 `sessions_spawn` 创建子agent：
+```python
+sessions_spawn(
+    task="...角色描述...",
+    label="risk-control-agent",
+    mode="run"
+)
+```
+
+### 风控Agent职责
+1. **交易前复核**：老大想买/卖时，判断是否合理、风险大不大
+2. **止损/止盈确认**：触发止损/止盈前确认是否执行
+3. **仓位建议**：根据大盘情况建议是否调整仓位
+4. **风险提示**：发现持仓异动时预警
+
+**注意**：不重复实时监控（已有auto_stock_alert.py脚本在做）
+
+### 注意事项
+- 子Agent独立运行，有自己的session
+- 主控（灵爪）负责协调和汇总
+- 使用 `sessions_list` 可以查看子Agent状态
 
 ## 📋 待办任务 - 2026-05-14
 
