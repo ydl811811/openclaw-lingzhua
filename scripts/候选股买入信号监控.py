@@ -5,16 +5,44 @@
 - 30秒间隔检查
 - 只发买入提醒，不发止盈提醒（因为还没买）
 - 增加缩量条件：价格到位 + 缩量（今日量<昨日量）才提醒
+- 2016-05-19: 修复重复发送问题，使用文件锁保证单实例
 """
 import os
-import urllib.request
-import json
+import sys
+import fcntl
 import time
 from datetime import datetime
 import subprocess
 
 PID_FILE = "/tmp/watchlist_monitor.pid"
+LOCK_FILE = "/tmp/watchlist_monitor.lock"
 VOLUME_FILE = "/tmp/watchlist_volume.json"
+
+# ============ 单实例锁定 ============
+def acquire_lock():
+    """使用文件锁确保只有一个实例运行"""
+    try:
+        lock_fd = open(LOCK_FILE, 'w')
+        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        lock_fd.write(str(os.getpid()))
+        lock_fd.flush()
+        return lock_fd
+    except (IOError, OSError) as e:
+        if 'LOCK_NB' not in str(e) and hasattr(e, 'errno') and e.errno == 11:
+            print(f"已有实例运行，无法获取锁 (PID_FILE: {PID_FILE})")
+        else:
+            print(f"无法获取锁: {e}")
+        sys.exit(1)
+
+def release_lock(lock_fd):
+    """释放文件锁"""
+    try:
+        fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+        lock_fd.close()
+        if os.path.exists(LOCK_FILE):
+            os.unlink(LOCK_FILE)
+    except:
+        pass
 
 # ============ 成交量数据管理 ============
 def get_volume_from_sina(codes):
@@ -144,18 +172,17 @@ FEISHU_BOT_URL = "https://open.feishu.cn/open-apis/bot/v2/hook/fbfd7f01-878c-4ec
 FEISHU_SECRET = "9vXyEvLigZ70Ynw1YeUtI"
 
 # 自选股池（未建仓，等待买入提醒）
-# === 2026-05-07 持仓更新：已持仓移出候选池，添加持仓监控 ===
+# === 2026-05-19 区间更新 ===
 WATCHLIST = {
-    '002240': {'name': '盛新锂能', 'buy_low': 57.00, 'buy_high': 58.50, 'stop': 55.00, 'note': '等回调到57-58.5区间，目标62-65，止损55'},
-    '002475': {'name': '立讯精密', 'buy_low': 68.50, 'buy_high': 70.50, 'stop': 67.00, 'note': '等回调68.5-70区间买，目标74-76，止损67'},
-    '301510': {'name': '固高科技', 'buy_low': 39.00, 'buy_high': 41.00, 'stop': 38.50, 'note': '等回调39-40区间，目标43-45，止损38.5'},
-    '002810': {'name': '山东赫达', 'buy_low': 26.50, 'buy_high': 28.00, 'stop': 25.50, 'note': '26.5-28区间，目标30-32，止损25.5'},
-    '300552': {'name': '万集科技', 'buy_low': 26.50, 'buy_high': 27.50, 'stop': 26.00, 'note': 'AI基础设施/ETC，业绩增速606%，目标30-32，止损26'},
-    '600552': {'name': '凯盛科技', 'buy_low': 17.50, 'buy_high': 18.00, 'stop': 16.50, 'note': '⭐2026-05-18更新，科技材料/UTG折叠屏，等回调17.5-18买，目标20-22，止损16.5'},
-    '300400': {'name': '劲拓股份', 'buy_low': 27.50, 'buy_high': 29.00, 'stop': 27.00, 'note': '等回调27.5-28.5，目标32-35，止损27'},
-    '300613': {'name': '富瀚微', 'buy_low': 58.00, 'buy_high': 60.00, 'stop': 54.00, 'note': 'AI芯片主线已卖出现价62.7。策略A回调58-60买（优先），止损54，目标65-72；策略B突破65追（次选），止损60，目标72'},
-    '002876': {'name': '三利谱', 'buy_low': 28.00, 'buy_high': 30.00, 'stop': 27.00, 'note': '偏光片/显示材料，合肥二厂拐点临近，OLED/车载偏光片新品放量，等回调28-30买，目标38-40'},
-    '002698': {'name': '博实股份', 'buy_low': 14.00, 'buy_high': 15.50, 'stop': 13.50, 'note': '⭐2026-05-18重新加入，工业机器人/自动化，等回调14-15.5买，目标18-20，止损13.5'},
+    '300629': {'name': '新劲刚', 'buy_low': 26.00, 'buy_high': 26.50, 'stop': 25.40, 'note': '等回调26-26.5缩量稳住建仓，止损25.40（今日低点下方），目标32-35'},
+    '002475': {'name': '立讯精密', 'buy_low': 70.00, 'buy_high': 73.00, 'stop': 67.00, 'note': '强势突破后回调，等70附近买，目标76-80，止损67'},
+    '301510': {'name': '固高科技', 'buy_low': 40.00, 'buy_high': 43.00, 'stop': 38.50, 'note': '突破41后走强，40-43区间，目标46-50，止损38.5'},
+    '300552': {'name': '万集科技', 'buy_low': 28.50, 'buy_high': 30.00, 'stop': 27.50, 'note': 'AI基础设施/ETC突破强势，等回调28.5-30买（或追涨），目标30-32，止损27.5'},
+    '600552': {'name': '凯盛科技', 'buy_low': 17.50, 'buy_high': 18.00, 'stop': 16.50, 'note': '科技材料/UTG折叠屏，17.5-18买，目标20-22，止损16.5'},
+    '300400': {'name': '劲拓股份', 'buy_low': 30.00, 'buy_high': 33.00, 'stop': 27.00, 'note': '突破29后走强，30-33区间（上调），目标36-40，止损27'},
+    '300613': {'name': '富瀚微', 'buy_low': 59.00, 'buy_high': 62.00, 'stop': 54.00, 'note': '突破60后回踩，59-62区间买（上调），止损54，目标68-75'},
+    '002876': {'name': '三利谱', 'buy_low': 28.00, 'buy_high': 30.00, 'stop': 27.00, 'note': '区间内，28-30买，目标38-40，止损27'},
+    '002698': {'name': '博实股份', 'buy_low': 14.00, 'buy_high': 15.00, 'stop': 13.50, 'note': '区间下沿，14-14.5买，工业机器人，目标18-20，止损13.5'},
 }
 
 # ============ 已持仓监控（止损+潜在加仓区间）============
@@ -163,7 +190,7 @@ WATCHLIST = {
 HOLDINGS = {
     '600900': {'name': '长江电力', 'cost': 27.02, 'stop': 25.00, 'target': 30.00, 'note': '🟢高股息长线持有，止损25，目标30'},
     '603876': {'name': '鼎胜新材', 'cost': 28.17, 'stop': 25.50, 'target': 32.00, 'note': '🟡持有100股@28.17，等解套'},
-    '588280': {'name': '科创板50ETF', 'cost': 1.739, 'stop': 1.60, 'target': 2.00, 'note': '🟢ETF持有，止损1.60，目标2.00'},
+    '588080': {'name': '科创板50ETF', 'cost': 1.739, 'stop': 1.60, 'target': 2.00, 'note': '🟢ETF持有，止损1.60，目标2.00'},
 }
 
 # ============ 函数 ============
@@ -211,12 +238,36 @@ def get_realtime(codes):
     return results
 
 def send_alert(msg):
-    """发送飞书提醒"""
+    """发送飞书提醒（带去重）"""
     import hashlib
     import hmac
     import base64
+    import urllib.request
+    import json
+    
+    # 去重检查：同一个消息5分钟内不重复发送
+    now = time.time()
+    msg_hash = hashlib.md5(msg.encode()).hexdigest()
+    cache_key = f'/tmp/watchlist_alert_cache_{msg_hash}'
+    
     try:
-        timestamp = str(int(time.time()))
+        if os.path.exists(cache_key):
+            last_time = float(open(cache_key).read().strip())
+            if now - last_time < 300:  # 5分钟内不重复
+                return
+        open(cache_key, 'w').write(str(now))
+        # 清理过期缓存（24小时前）
+        for f in os.listdir('/tmp'):
+            if f.startswith('watchlist_alert_cache_') and (now - os.path.getmtime(f'/tmp/{f}') > 86400):
+                try:
+                    os.unlink(f'/tmp/{f}')
+                except:
+                    pass
+    except:
+        pass
+    
+    try:
+        timestamp = str(int(now))
         string_to_sign = timestamp + '\n' + FEISHU_SECRET
         sign = base64.b64encode(hmac.new(string_to_sign.encode(), digestmod=hashlib.sha256).digest()).decode()
         
@@ -354,19 +405,13 @@ def main():
         time.sleep(30)
 
 if __name__ == "__main__":
-    if os.path.exists(PID_FILE):
-        old_pid = open(PID_FILE).read().strip()
-        try:
-            os.kill(int(old_pid), 0)
-            print(f"已有实例运行 (PID {old_pid})")
-            exit(1)
-        except:
-            pass
-    
-    open(PID_FILE, 'w').write(str(os.getpid()))
+    lock_fd = acquire_lock()
     
     try:
         main()
     except KeyboardInterrupt:
         print("\n停止监控")
-        os.unlink(PID_FILE)
+    finally:
+        release_lock(lock_fd)
+        if os.path.exists(PID_FILE):
+            os.unlink(PID_FILE)

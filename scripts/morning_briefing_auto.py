@@ -21,6 +21,7 @@ from pathlib import Path
 OUTPUT_DIR = "/home/YDL/.openclaw/workspace/a_stock_plan/daily"
 TEMPLATE_FILE = "/home/YDL/.openclaw/workspace/a_stock_plan/template/晨报模板.md"
 TRADING_LEDGER = "/home/YDL/.openclaw/workspace/a_stock_plan/交易记录台账.md"
+MARKET_SUMMARY_FILE = "/home/YDL/.openclaw/workspace/a_stock_plan/fund_flow/市场数据汇总.md"
 CANDIDATE_POOL_DIR = "/home/YDL/.openclaw/workspace/a_stock_plan/daily"
 
 # 飞书推送
@@ -180,7 +181,7 @@ def get_index_data_remote():
     return result
 
 def get_yesterday_summary():
-    """获取昨日市场总结（优先从复盘报告，失败则从adata获取）"""
+    """获取昨日市场总结（优先从市场数据汇总文件，其次从复盘报告，失败则从adata获取）"""
     yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
     review_file = f"{CANDIDATE_POOL_DIR}/{yesterday}/post_market_review.md"
     
@@ -201,6 +202,35 @@ def get_yesterday_summary():
         'hot_sectors': '暂无数据',
         'dragon_tiger': '暂无数据',
     }
+    
+    # 优先从市场数据汇总文件读取
+    if os.path.exists(MARKET_SUMMARY_FILE):
+        try:
+            with open(MARKET_SUMMARY_FILE, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # 查找昨日数据行（格式：| 05-19 | 3608 | ...）
+            yesterday_short = yesterday[5:]  # 变成 05-19 格式
+            for line in content.split('\n'):
+                if f'| {yesterday_short} |' in line:
+                    cells = [c.strip() for c in line.split('|')]
+                    if len(cells) >= 7:
+                        result['hsgt_net'] = cells[5]  # 北向净流入
+                        # 天时评分从备注提取
+                        if '备注' in content:
+                            remark_start = content.find('备注')
+                            remark_section = content[remark_start:remark_start+200] if remark_start > 0 else ''
+                            for rem_line in remark_section.split('\n'):
+                                if yesterday_short in rem_line and '天时评分' in rem_line:
+                                    m = re.search(r'天时评分.*?(\d+/10)', rem_line)
+                                    if not m:
+                                        m = re.search(r'\*?(\d+/10)\*?', rem_line)
+                                    if m:
+                                        result['hot_sectors'] = m.group(1)
+                    break
+            print(f"  昨日数据(汇总文件): 北向={result['hsgt_net']}")
+        except Exception as e:
+            print(f"  读取市场汇总文件失败: {e}")
     
     # 尝试从复盘报告读取
     if os.path.exists(review_file):
@@ -506,6 +536,9 @@ def generate_report():
             for s in candidate_pool['long']
         ]) or '| - | - | - | - | - |',
         
+        candidate_zones=f"### 短线候选\n| 名称 | 代码 | 题材 | 评分 | 备注 |\n|------|------|------|------|------|\n{short_stocks}\n\n### 长线候选\n| 名称 | 代码 | 题材 | 评分 | 备注 |\n|------|------|------|------|------|\n{long_stocks}",
+        candidate_notes="备注：候选股池根据最新选股结果生成，仅供参考，不构成投资建议。",
+
         # 持仓
         positions='\n'.join([
             f"| {p['name']} | {p['code']} | {p['cost']:.3f} | {p['current_price']:.2f} | {p['pnl_pct']:+.2f}% | - | {p['status']} |"
