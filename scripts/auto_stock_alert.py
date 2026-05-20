@@ -23,8 +23,8 @@ FEISHU_SECRET = "9vXyEvLigZ70Ynw1YeUtI"
 # 备用持仓配置（当台账读取失败时使用）
 FALLBACK_POSITIONS = {
     '600900': {'name': '长江电力', 'cost': 27.02, 'qty': 400, 'stop': 25.00, 'take': 30.00, 'reduce': 26.50, 'add': 25.50, 'breakout_add': 28.50, 'note': '高股息水电，长线持有'},
-    '603876': {'name': '鼎胜新材', 'cost': 25.831, 'qty': 100, 'stop': 27.50, 'take': 35.00, 'reduce': 29.00, 'add': None, 'breakout_add': None, 'note': '电池铝箔，跌破27.50清仓，持有等解套'},
-    '300552': {'name': '万集科技', 'cost': 28.575, 'qty': 100, 'stop': 24.50, 'take': 32.00, 'reduce': None, 'add': None, 'breakout_add': None, 'note': 'AI基础设施/ETC，业绩增速606%，持有100股等解套'},
+    '588080': {'name': '科创板50ETF', 'cost': 1.739, 'qty': 1800, 'stop': 1.60, 'take': 2.00, 'reduce': None, 'add': None, 'breakout_add': None, 'note': '科创板50ETF，止损1.60'},
+    '002810': {'name': '山东赫达', 'cost': 25.74, 'qty': 300, 'stop': 24.48, 'take': 27.50, 'reduce': None, 'add': None, 'breakout_add': None, 'note': '山东赫达，止损24.48'},
 }
 
 # 大盘指数
@@ -87,13 +87,17 @@ def read_positions_from_ledger():
                     stop_str = cells[6].replace('**', '').replace('¥', '')
                     stop = float(stop_str)
                     take_str = cells[7].replace('**', '').replace('¥', '')
-                    take = float(take_str)
+                    # 提取止盈价（可能是 TP1:27.50/TP2:29.00 格式，取第一个有效数字）
+                    import re
+                    all_nums = re.findall(r'[\d.]+', take_str)
+                    # 第一个匹配可能是 "1"（来自TP1的1），取第二个作为实际价格
+                    take = float(all_nums[1]) if len(all_nums) > 1 else (float(all_nums[0]) if all_nums else 0.0)
                     
                     # 检查状态列
                     status = cells[8].replace('**', '') if len(cells) > 8 else ''
                     
-                    # 排除已卖出的（状态包含"卖出"）
-                    if '卖出' in status or '已卖' in status:
+                    # 排除已卖出的（状态包含"已卖出"、"已清仓"、"已止损"、"已止盈"）
+                    if '已卖出' in status or '已清仓' in status or '已止损' in status or '已止盈' in status:
                         continue
                     
                     # 解析预警信息（如果有的话）
