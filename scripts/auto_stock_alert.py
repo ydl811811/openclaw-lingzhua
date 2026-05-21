@@ -87,11 +87,19 @@ def read_positions_from_ledger():
                     stop_str = cells[6].replace('**', '').replace('¥', '')
                     stop = float(stop_str)
                     take_str = cells[7].replace('**', '').replace('¥', '')
-                    # 提取止盈价（可能是 TP1:27.50/TP2:29.00 格式，取第一个有效数字）
+                    # 提取止盈价（支持 TP1:27.50/TP2:29.00 格式 或 简单价格 27.50）
                     import re
-                    all_nums = re.findall(r'[\d.]+', take_str)
-                    # 第一个匹配可能是 "1"（来自TP1的1），取第二个作为实际价格
-                    take = float(all_nums[1]) if len(all_nums) > 1 else (float(all_nums[0]) if all_nums else 0.0)
+                    # 先尝试匹配 TP1/TP2:价格 格式
+                    tp1_match = re.search(r'TP1:?(\d+\.?\d*)', take_str)
+                    tp2_match = re.search(r'TP2:?(\d+\.?\d*)', take_str)
+                    if tp1_match:
+                        take = float(tp1_match.group(1))
+                        take2 = float(tp2_match.group(1)) if tp2_match else 0.0
+                    else:
+                        # 降级：提取第一个数字作为止盈价
+                        all_nums = re.findall(r'[\d.]+', take_str)
+                        take = float(all_nums[0]) if all_nums else 0.0
+                        take2 = 0.0
                     
                     # 检查状态列
                     status = cells[8].replace('**', '') if len(cells) > 8 else ''
@@ -114,6 +122,7 @@ def read_positions_from_ledger():
                         'qty': qty,
                         'stop': stop,
                         'take': take,
+                        'take2': take2,  # 第二止盈目标（如TP2）
                         'warning': warning,  # 新增预警线（如47元）
                     }
                     print(f"  📥 读取持仓: {name} {code} x{qty}")
@@ -243,6 +252,7 @@ def check(positions):
         cost = pos['cost']
         stop = pos['stop']
         take = pos['take']
+        take2 = pos.get('take2', 0)
         
         profit = (price - cost) * qty
         profit_pct = (price - cost) / cost * 100 if cost > 0 else 0
@@ -256,9 +266,11 @@ def check(positions):
             # 止损（最优先）
             if price <= stop:
                 alerts.append(f"🚨止损！{pos['name']} 现价{price} ≤ 止损{stop:.2f}")
-            # 止盈
+            # 止盈检查（分两级）
+            if price >= take2 and take2 > 0:
+                alerts.append(f"🎯止盈(TP2)！{pos['name']} 现价{price} ≥ TP2目标{take2:.2f}")
             elif price >= take:
-                alerts.append(f"🎯止盈！{pos['name']} 现价{price} ≥ 目标{take:.2f}")
+                alerts.append(f"🎯止盈(TP1)！{pos['name']} 现价{price} ≥ TP1目标{take:.2f}")
             # 减仓提醒（跌破减仓位但未到止损）
             elif reduce_price and price <= reduce_price:
                 alerts.append(f"📍减仓提醒！{pos['name']} 现价{price} ≤ 减仓线{reduce_price:.2f}，建议减仓50%")
