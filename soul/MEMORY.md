@@ -100,7 +100,8 @@
   - `log/` - 系统日志
   - `archive/` - 历史归档
 - **重要文件位置**：
-  - 选股策略：`a_stock_plan/strategy/选股策略框架_v3.1_优化版.md`（当前执行版本）
+  - 选股策略：`a_stock_plan/strategy/选股策略框架_v3.3_三轨版.md`（当前执行版本 v3.3）
+  - 交易SOP：`a_stock_plan/standard_procedures/灵爪股票交易SOP系统_v3.6.md`（当前执行版本 v3.6）
   - 每日复盘：`a_stock_plan/daily/YYYY-MM-DD/post_market_review.md`
   - 明日股票池：`a_stock_plan/daily/YYYY-MM-DD/tomorrow_pool.json`
 - **自动化脚本**：所有脚本已更新指向此目录
