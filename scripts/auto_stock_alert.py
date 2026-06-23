@@ -22,9 +22,10 @@ FEISHU_SECRET = "9vXyEvLigZ70Ynw1YeUtI"
 
 # 备用持仓配置（当台账读取失败时使用）
 FALLBACK_POSITIONS = {
-    '600900': {'name': '长江电力', 'cost': 27.02, 'qty': 400, 'stop': 25.00, 'take': 30.00, 'reduce': 26.50, 'add': 25.50, 'breakout_add': 28.50, 'note': '高股息水电，长线持有'},
-    '588080': {'name': '科创板50ETF', 'cost': 1.739, 'qty': 1800, 'stop': 1.60, 'take': 2.00, 'reduce': None, 'add': None, 'breakout_add': None, 'note': '科创板50ETF，止损1.60'},
-    '002810': {'name': '山东赫达', 'cost': 25.74, 'qty': 300, 'stop': 24.48, 'take': 27.50, 'reduce': None, 'add': None, 'breakout_add': None, 'note': '山东赫达，止损24.48'},
+    '600900': {'name': '长江电力', 'cost': 26.76, 'qty': 200, 'stop': 25.00, 'take': 30.00, 'reduce': None, 'add': None, 'breakout_add': None, 'note': '高股息水电，止损25.00，目标30.00'},
+    '603876': {'name': '鼎胜新材', 'cost': 26.20, 'qty': 200, 'stop': 23.50, 'take': 30.00, 'reduce': None, 'add': None, 'breakout_add': None, 'note': '新能源/铝箔，止损23.50，目标30.00'},
+    '588080': {'name': '科创50ETF', 'cost': 1.431, 'qty': 0, 'stop': 1.30, 'take': 2.00, 'reduce': None, 'add': None, 'breakout_add': None, 'note': '🟡已卖出等接回，理想区间1.30-1.50'},
+    '512480': {'name': '半导体ETF', 'cost': 2.007, 'qty': 0, 'stop': 1.80, 'take': 2.50, 'reduce': None, 'add': None, 'breakout_add': None, 'note': '🟡已卖出等接回，理想区间1.80-2.00'},
 }
 
 # 大盘指数
