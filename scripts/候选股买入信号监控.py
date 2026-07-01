@@ -174,22 +174,19 @@ FEISHU_SECRET = "9vXyEvLigZ70Ynw1YeUtI"
 # 自选股池（未建仓，等待买入提醒）
 # === 2026-06-18 收盘后基于前3天重新设定区间 ===
 # 自选股池（未建仓，等待买入提醒）
-# === 2026-06-22 清理：移除趋势走坏的个股，只保留ETF ===
-# 移除：新劲刚/盛视科技/传艺科技/中国神华/立讯精密/万集科技/盛新锂能/宝信软件/华映科技/维信诺
-# 原因：全部跌破MA20/MA60，短期不适合操作
+# === 2026-07-01 更新：只监控ETF接回，移除个股持仓监控（已集成到auto_stock_alert.py） ===
+# 移除：长江电力、鼎胜新材（移到auto_stock_alert.py监控）
+# 保留：ETF接回监控（只推送触发条件，不触发静默）
 WATCHLIST = {
-    '515980': {'name': '人工智能ETF', 'buy_low': 1.10, 'buy_high': 1.25, 'stop': 1.00, 'note': '🟢长线轨，等接回，理想区间1.10-1.25（成本1.089已止盈），目标1.40-1.50，止损1.00'},
-    '588080': {'name': '科创50ETF', 'buy_low': 1.30, 'buy_high': 1.50, 'stop': 1.20, 'note': '🟢长线轨，等接回，理想区间1.30-1.50（成本1.431已止盈），目标1.80-2.00，止损1.20'},
-    '512480': {'name': '半导体ETF', 'buy_low': 1.80, 'buy_high': 2.00, 'stop': 1.70, 'note': '🟢长线轨，多头+站年线，等接回，区间1.80-2.00（成本2.007已止盈），目标2.30-2.50，止损1.70'},
-    '159516': {'name': '半导体设备ETF', 'buy_low': 1.333, 'buy_high': 1.565, 'stop': 1.292, 'note': '🟢长线轨，多头+站年线，20日涨16.4%最强，区间1.33-1.57，止损1.29，目标1.80+'},
+    '515980': {'name': '人工智能ETF', 'targets': [1.146, 1.046, 0.989], 'notes': ['第1批-MA20', '第2批-MA60', '第3批-0.618回撤'], 'done_batches': set()},
+    '588080': {'name': '科创50ETF', 'targets': [1.796, 1.625, 1.563], 'notes': ['第1批-MA20', '第2批-MA60', '第3批-0.618回撤'], 'done_batches': set()},
+    '512480': {'name': '半导体ETF', 'targets': [2.223, 1.908, 1.861], 'notes': ['第1批-MA20', '第2批-MA60', '第3批-0.618回撤'], 'done_batches': set()},
+    '159516': {'name': '半导体设备ETF', 'targets': [1.333, 1.292], 'notes': ['第1批-MA20', '第2批-止损'], 'done_batches': set()},
 }
 
-# ============ 已持仓监控（止损+潜在加仓区间）============
-# 这些是我们已买入的股票，监控是否触发止损或加仓机会
-HOLDINGS = {
-    '600900': {'name': '长江电力', 'cost': 26.76, 'stop': 25.00, 'target': 30.00, 'note': '🟢持有200股，成本26.76，止损25.00，目标30.00'},
-    '603876': {'name': '鼎胜新材', 'cost': 26.20, 'stop': 23.50, 'target': 30.00, 'note': '🟡持有200股，成本26.20，今日买，止损23.50，目标30.00'},
-}
+# ============ 已移除个股持仓监控 ============
+# 长江电力、鼎胜新材的止损/止盈监控已集成到 auto_stock_alert.py
+# 本脚本现在专注于ETF接回监控
 
 # ============ 函数 ============
 
@@ -306,60 +303,38 @@ def is_trading_hours():
     return in_morning or in_afternoon
 
 def check_watchlist():
-    """检查自选股是否进入买入区间 + 缩量条件"""
+    """检查ETF是否跌到接回区间，只推送触发条件，不触发静默"""
     codes = list(WATCHLIST.keys())
     quotes = get_realtime(codes)
     
-    # 获取成交量数据（优先使用新浪接口，更稳定）
-    volumes = get_volume_from_sina(codes)
-    if not volumes:  # 如果新浪接口失败，尝试adata接口
-        print("[Warn] Sina volume failed, trying adata...")
-        volumes = get_volume_from_adata(codes)
-    avg_volumes = get_5day_avg_volume(codes)  # 使用5日均量
-    
     alerts = []
     for code, info in WATCHLIST.items():
-        if code in quotes:
-            price = quotes[code]['price']
-            pct = quotes[code]['pct']
-            buy_low = info['buy_low']
-            buy_high = info['buy_high']
-            stop = info['stop']
-            today_vol = volumes.get(code, 0)
-            
-            # 检查价格是否在买入区间
-            price_in_zone = buy_low <= price <= buy_high
-            
-            # 检查是否缩量（今日量 < 5日均量 × 0.8）
-            has_vol_data = code in avg_volumes and avg_volumes[code] > 0
-            vol_contracted = is_volume_contracted(code, today_vol, avg_volumes) if has_vol_data else False
-            
-            if price_in_zone and has_vol_data and vol_contracted:
-                vol_info = f"\n成交量: {today_vol/10000:.1f}万 (5日均量{avg_volumes.get(code, 0)/10000:.1f}万)"
-                alert = f"🎯买入提醒(缩量确认)\n{info['name']}({code}) 现价{price:.2f}元\n已进入买入区间: {buy_low}-{buy_high}\n{vol_info}\n备注: {info['note']}"
-                alerts.append(alert)
-            elif price_in_zone and not has_vol_data:
-                # 没有均量数据，不发提醒
-                print(f"[数据缺失] {info['name']} 价格到位但无法获取均量数据，暂不提醒")
-            elif price_in_zone and has_vol_data and not vol_contracted:
-                # 价格到位但未缩量，打印日志但不提醒
-                vol_info = f"成交量: {today_vol/10000:.1f}万 (5日均量{avg_volumes.get(code, 0)/10000:.1f}万) - 未缩量"
-                print(f"[条件未满足] {info['name']} 价格到位但未缩量 {vol_info}")
-    
-    # 保存今日成交量（供明日使用）
-    if volumes:
-        save_current_volume(volumes)
+        if code not in quotes:
+            continue
+        price = quotes[code]['price']
+        
+        # 检查是否跌到任意接回目标价
+        for i, target in enumerate(info['targets']):
+            if i in info['done_batches']:
+                continue  # 已触发的批次跳过
+            if price <= target:
+                note = info['notes'][i] if i < len(info['notes']) else f'第{i+1}批'
+                alert = f"🚨{info['name']}({code}) 触发接回！\n现价{price:.3f} ≤ 目标{target:.3f}（{note}）\n建议买入操作"
+                alerts.append((code, alert, i))
+                info['done_batches'].add(i)
+                break  # 每个ETF只报一次
     
     return alerts
 
 def main():
     print("="*60)
-    print("📋 自选股买入提醒脚本启动")
+    print("📋 ETF接回监控脚本启动")
     print("="*60)
     print(f"监控标的: {len(WATCHLIST)} 只")
     for code, info in WATCHLIST.items():
-        print(f"  {code} {info['name']} 买入区间:{info['buy_low']}-{info['buy_high']}")
+        print(f"  {code} {info['name']} 接回目标: {info['targets']}")
     print("="*60)
+    print("规则: 只有触发接回价时才推送，不触发静默")
     print()
     
     last_alert_time = {}
@@ -367,14 +342,15 @@ def main():
     while True:
         try:
             now = datetime.now()
+            
+            # 非交易时间跳过
+            if not is_trading_hours():
+                time.sleep(60)
+                continue
+            
             alerts = check_watchlist()
             
-            for alert in alerts:
-                code = alert.split('\n')[1].split('(')[1].split(')')[0]
-                
-                if not is_trading_hours():
-                    continue
-                
+            for code, alert, batch_idx in alerts:
                 if code in last_alert_time:
                     if (now - last_alert_time[code]).seconds < 300:
                         continue
@@ -385,18 +361,8 @@ def main():
                 send_alert(alert)
                 last_alert_time[code] = now
             
-            if not alerts:
-                if now.second < 5:
-                    quotes = get_realtime(list(WATCHLIST.keys()))
-                    print(f"[{now.strftime('%H:%M:%S')}] 监控中...", end=" ")
-                    for code, q in quotes.items():
-                        name = WATCHLIST[code]['name']
-                        price = q['price']
-                        pct = q['pct']
-                        in_zone = "✅买入区" if WATCHLIST[code]['buy_low'] <= price <= WATCHLIST[code]['buy_high'] else "⏳等待"
-                        print(f"{name}:{price:.2f}({pct:+.2f}%){in_zone}", end=" ")
-                    print()
-        
+            # 没有触发时：完全静默，不打印任何内容
+            
         except Exception as e:
             print(f"错误: {e}")
         

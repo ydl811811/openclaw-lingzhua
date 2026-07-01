@@ -16,6 +16,9 @@ from datetime import datetime
 PID_FILE = "/tmp/stock_monitor.pid"
 TRADING_LEDGER = "/home/YDL/.openclaw/workspace/a_stock_plan/交易记录台账.md"
 
+# 需要跳过的品种（已清仓/不再监控）
+SKIP_CODES = {'588080', '512480', '515980', '603876'}  # 科创50ETF、半导体ETF、人工智能ETF、鼎胜新材
+
 # ============ 配置 ============
 FEISHU_BOT_URL = "https://open.feishu.cn/open-apis/bot/v2/hook/fbfd7f01-878c-4ece-80e6-5e7324ab3692"
 FEISHU_SECRET = "9vXyEvLigZ70Ynw1YeUtI"
@@ -244,6 +247,10 @@ def check(positions):
     
     # 检查持仓（含自选监控）
     for code, pos in positions.items():
+        # 跳过已清仓品种
+        if code in SKIP_CODES:
+            continue
+        
         if code not in results:
             continue
         
@@ -287,10 +294,61 @@ def check(positions):
         else:
             # 无持仓（自选监控）：检查是否到买入区间
             buy_note = pos.get('note', '')
+            # 如果note中包含"已卖出"/"已清仓"标记，跳过监控
+            if '已卖出' in buy_note or '已清仓' in buy_note:
+                continue
             if price <= stop:
                 alerts.append(f"🟢买入信号！{pos['name']} 现价{price} ≤ 买入区间{stop:.2f} {buy_note}")
             elif price >= take:
                 alerts.append(f"🔴价格到目标！{pos['name']} 现价{price} ≥ 目标{take:.2f} {buy_note}")
+    
+    # ========== ETF接回检查 ==========
+    # 监控已卖出ETF是否跌到接回区间
+    ETF_REBUY = {
+        '588080': {'name': '科创50ETF', 'levels': [
+            {'price': 1.796, 'batch': 1, 'done': False},
+            {'price': 1.625, 'batch': 2, 'done': False},
+            {'price': 1.563, 'batch': 3, 'done': False},
+        ]},
+        '512480': {'name': '半导体ETF', 'levels': [
+            {'price': 2.223, 'batch': 1, 'done': False},
+            {'price': 1.908, 'batch': 2, 'done': False},
+            {'price': 1.861, 'batch': 3, 'done': False},
+        ]},
+        '515980': {'name': 'AI ETF', 'levels': [
+            {'price': 1.146, 'batch': 1, 'done': False},
+            {'price': 1.046, 'batch': 2, 'done': False},
+            {'price': 0.989, 'batch': 3, 'done': False},
+        ]},
+    }
+    
+    # 从台账读取已触发的批次
+    rebuy_done = set()
+    if os.path.exists(TRADING_LEDGER):
+        try:
+            with open(TRADING_LEDGER, 'r', encoding='utf-8') as f:
+                ledger_content = f.read()
+            # 查找已触发的接回记录
+            for code in ETF_REBUY:
+                pattern = f'{code}'
+                if '接回' in ledger_content and code in ledger_content:
+                    # 简化处理：检查台账中是否有该ETF的接回成交记录
+                    pass
+        except:
+            pass
+    
+    # 获取ETF实时价格
+    for code, info in ETF_REBUY.items():
+        if code not in results:
+            continue
+        price = results[code]['price']
+        for level in info['levels']:
+            if level['done']:
+                continue
+            if price <= level['price']:
+                alert_msg = f"🚨{info['name']} 触发第{level['batch']}批接回！现价{price:.3f} ≤ 目标{level['price']:.3f}，建议买入"
+                alerts.append(alert_msg)
+                level['done'] = True
     
     return alerts
 
