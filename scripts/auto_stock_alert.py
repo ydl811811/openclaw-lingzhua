@@ -17,303 +17,171 @@ PID_FILE = "/tmp/stock_monitor.pid"
 TRADING_LEDGER = "/home/YDL/.openclaw/workspace/a_stock_plan/交易记录台账.md"
 
 # 需要跳过的品种（已清仓/不再监控）
-SKIP_CODES = {'588080', '512480', '515980', '603876'}  # 科创50ETF、半导体ETF、人工智能ETF、鼎胜新材
+SKIP_CODES = {'588080', '512480', '515980', '603876'}
 
-# ============ 配置 ============
-FEISHU_BOT_URL = "https://open.feishu.cn/open-apis/bot/v2/hook/fbfd7f01-878c-4ece-80e6-5e7324ab3692"
-FEISHU_SECRET = "9vXyEvLigZ70Ynw1YeUtI"
-
-# 备用持仓配置（当台账读取失败时使用）
+# 默认持仓
 FALLBACK_POSITIONS = {
-    '600900': {'name': '长江电力', 'cost': 26.76, 'qty': 200, 'stop': 25.00, 'take': 30.00, 'reduce': None, 'add': None, 'breakout_add': None, 'note': '高股息水电，止损25.00，目标30.00'},
-    '603876': {'name': '鼎胜新材', 'cost': 26.20, 'qty': 200, 'stop': 23.50, 'take': 30.00, 'reduce': None, 'add': None, 'breakout_add': None, 'note': '新能源/铝箔，止损23.50，目标30.00'},
-    '588080': {'name': '科创50ETF', 'cost': 1.431, 'qty': 0, 'stop': 1.30, 'take': 2.00, 'reduce': None, 'add': None, 'breakout_add': None, 'note': '🟡已卖出等接回，理想区间1.30-1.50'},
-    '512480': {'name': '半导体ETF', 'cost': 2.007, 'qty': 0, 'stop': 1.80, 'take': 2.50, 'reduce': None, 'add': None, 'breakout_add': None, 'note': '🟡已卖出等接回，理想区间1.80-2.00'},
+    '000100': {'name': 'TCL科技', 'cost': 6.16, 'qty': 800, 'stop': 5.40, 'take': 6.50, 'reduce': None, 'add': None, 'breakout_add': None, 'note': '持有'},
+    '600267': {'name': '海正药业', 'cost': 10.28, 'qty': 600, 'stop': 9.00, 'take': 11.50, 'reduce': None, 'add': None, 'breakout_add': None, 'note': '持有'},
+    '600900': {'name': '长江电力', 'cost': 26.785, 'qty': 200, 'stop': 25.50, 'take': 28.00, 'reduce': None, 'add': None, 'breakout_add': None, 'note': '持有'},
+    '159869': {'name': '游戏动漫ETF', 'cost': 1.099, 'qty': 5000, 'stop': 0.95, 'take': 1.18, 'reduce': None, 'add': None, 'breakout_add': None, 'note': '持有'},
+    '159516': {'name': '半导体设备ETF', 'cost': 1.766, 'qty': 0, 'stop': 1.68, 'take': 2.10, 'reduce': None, 'add': None, 'breakout_add': None, 'note': '🟡已卖出，等接回区间1.65~1.72/1.53~1.58'},
+    '002407': {'name': '多氟多', 'cost': 50.23, 'qty': 0, 'stop': 41.00, 'take': 55.00, 'reduce': None, 'add': None, 'breakout_add': None, 'note': '🟡已卖出，等接回区间44~48'},
 }
 
-# 大盘指数
 INDICES = {
-    '000001': {'name': '上证指数', 'key_level': 4050, 'support': 4000},
+    '000001': {'name': '上证指数'},
     '399001': {'name': '深证成指'},
     '399006': {'name': '创业板指'},
+    '000688': {'name': '科创50'},
 }
-INDEX_PREFIX = {'000001': 'sh', '399001': 'sz', '399006': 'sz'}
-
-# ============ 函数 ============
-
-def read_positions_from_ledger():
-    """从交易记录台账读取当前持仓"""
-    positions = {}
-    
-    if not os.path.exists(TRADING_LEDGER):
-        print(f"⚠️ 交易台账不存在: {TRADING_LEDGER}")
-        return FALLBACK_POSITIONS
-    
-    try:
-        with open(TRADING_LEDGER, 'r', encoding='utf-8') as f:
-            content = f.read()
-        
-        # 找到"当前持仓"表格
-        in_position_section = False
-        lines = content.split('\n')
-        
-        for line in lines:
-            # 检测到"当前持仓"标题
-            if '## 当前持仓' in line:
-                in_position_section = True
-                continue
-            
-            # 如果遇到另一个##开头的段落，退出持仓区域
-            if in_position_section and line.strip().startswith('##'):
-                break
-            
-            # 解析表格行
-            if '|' in line and in_position_section:
-                cells = [c.strip() for c in line.split('|')]
-                if len(cells) < 8:
-                    continue
-                
-                # 跳过表头
-                if '股票' in cells[1] or '代码' in cells[1]:
-                    continue
-                
-                # 跳过已卖出的行（包含~~）
-                if '~~' in cells[1]:
-                    continue
-                
-                try:
-                    name = cells[1].replace('**', '')
-                    code = cells[2].replace('**', '')
-                    qty_str = cells[3].replace('**', '').replace('¥', '').replace(',', '')
-                    qty = int(qty_str)
-                    cost_str = cells[4].replace('**', '').replace('¥', '')
-                    cost = float(cost_str)
-                    stop_str = cells[6].replace('**', '').replace('¥', '')
-                    stop = float(stop_str)
-                    take_str = cells[7].replace('**', '').replace('¥', '')
-                    # 提取止盈价（支持 TP1:27.50/TP2:29.00 格式 或 简单价格 27.50）
-                    import re
-                    # 先尝试匹配 TP1/TP2:价格 格式
-                    tp1_match = re.search(r'TP1:?(\d+\.?\d*)', take_str)
-                    tp2_match = re.search(r'TP2:?(\d+\.?\d*)', take_str)
-                    if tp1_match:
-                        take = float(tp1_match.group(1))
-                        take2 = float(tp2_match.group(1)) if tp2_match else 0.0
-                    else:
-                        # 降级：提取第一个数字作为止盈价
-                        all_nums = re.findall(r'[\d.]+', take_str)
-                        take = float(all_nums[0]) if all_nums else 0.0
-                        take2 = 0.0
-                    
-                    # 检查状态列
-                    status = cells[8].replace('**', '') if len(cells) > 8 else ''
-                    
-                    # 排除已卖出的（状态包含"已卖出"、"已清仓"、"已止损"、"已止盈"）
-                    if '已卖出' in status or '已清仓' in status or '已止损' in status or '已止盈' in status:
-                        continue
-                    
-                    # 解析预警信息（如果有的话）
-                    warning = None
-                    if '预警:' in status:
-                        import re
-                        m = re.search(r'预警:?(\d+\.?\d*)', status)
-                        if m:
-                            warning = float(m.group(1))
-                    
-                    positions[code] = {
-                        'name': name,
-                        'cost': cost,
-                        'qty': qty,
-                        'stop': stop,
-                        'take': take,
-                        'take2': take2,  # 第二止盈目标（如TP2）
-                        'warning': warning,  # 新增预警线（如47元）
-                    }
-                    print(f"  📥 读取持仓: {name} {code} x{qty}")
-                except Exception as e:
-                    pass  # 跳过解析失败的行
-        
-        if positions:
-            print(f"  ✅ 从台账读取到 {len(positions)} 只持仓")
-        else:
-            print(f"  ⚠️ 台账中无有效持仓，使用备用配置")
-            return FALLBACK_POSITIONS
-            
-    except Exception as e:
-        print(f"  ❌ 读取台账失败: {e}")
-        return FALLBACK_POSITIONS
-    
-    return positions
-
-def get_realtime(codes):
-    """获取实时数据（腾讯接口）"""
-    prefixed = []
-    for code in codes:
-        if code in INDEX_PREFIX:
-            prefixed.append(f"{INDEX_PREFIX[code]}{code}")
-        elif code.startswith(('0','3')):
-            prefixed.append(f"sz{code}")
-        else:
-            prefixed.append(f"sh{code}")
-    
-    if not prefixed:
-        return {}
-    
-    url = f'https://qt.gtimg.cn/q={",".join(prefixed)}'
-    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-    
-    with urllib.request.urlopen(req, timeout=10) as r:
-        data = r.read().decode('gbk', errors='replace')
-    
-    results = {}
-    for line in data.strip().split('\n'):
-        if '=' not in line:
-            continue
-        key, rest = line.split('=', 1)
-        if '"' not in rest:
-            continue
-        fields = rest.strip('"').split('~')
-        if len(fields) < 35:
-            continue
-        sym = key.replace('v_', '')
-        code = sym[2:]
-        results[code] = {
-            'price': float(fields[3]),
-            'change_pct': float(fields[32]) if fields[32] else 0,
-        }
-    return results
-
-def send_feishu(msg):
-    """发送飞书（带签名验证）"""
-    import hmac
-    import hashlib
-    import base64
-    
-    timestamp = str(int(time.time()))
-    string_to_sign = timestamp + '\n' + FEISHU_SECRET
-    sign = base64.b64encode(hmac.new(string_to_sign.encode(), digestmod=hashlib.sha256).digest()).decode()
-    
-    payload = {"msg_type": "text", "content": {"text": msg}}
-    payload['timestamp'] = timestamp
-    payload['sign'] = sign
-    
-    data = json.dumps(payload).encode('utf-8')
-    req = urllib.request.Request(FEISHU_BOT_URL, data=data, headers={'Content-Type': 'application/json'})
-    try:
-        with urllib.request.urlopen(req, timeout=10) as r:
-            return json.loads(r.read().decode('utf-8'))
-    except Exception as e:
-        print(f"飞书推送失败: {e}")
-        return None
-
-def write_sharebox_alert(msg):
-    """写入sharebox，让灵爪能收到预警"""
-    try:
-        sharebox_path = "/home/YDL/.openclaw/workspace/claw-communication/sharebox/"
-        os.makedirs(sharebox_path, exist_ok=True)
-        
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"股票预警_灵爪_{timestamp}.txt"
-        filepath = os.path.join(sharebox_path, filename)
-        
-        with open(filepath, 'w', encoding='utf-8') as f:
-            f.write(msg)
-        
-        print(f"✅ 已写入sharebox: {filename}")
-        return True
-    except Exception as e:
-        print(f"sharebox写入失败: {e}")
-        return False
 
 def is_trading_hours():
-    """检查是否在交易时间"""
     now = datetime.now()
-    hour, minute = now.hour, now.minute
-    weekday = now.weekday()
-    if weekday >= 5:
+    if now.weekday() >= 5:
         return False
-    if 9 <= hour < 11 or (hour == 11 and minute <= 30):
-        return True
-    if 13 <= hour < 15:
-        return True
-    return False
+    t = now.hour * 100 + now.minute
+    return (930 <= t <= 1130) or (1300 <= t <= 1500)
+
+def get_realtime(codes):
+    results = {}
+    for code in codes:
+        try:
+            market = 'sh' if code.startswith(('6', '5')) or code in ('000001', '000688') else 'sz'
+            url = f'https://qt.gtimg.cn/q={market}{code}'
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            raw = urllib.request.urlopen(req, timeout=8).read().decode('gbk', errors='replace')
+            m = re.search(r'v_' + market + code + r'="([^"]+)"', raw)
+            if m:
+                parts = m.group(1).split('~')
+                price = float(parts[3]) if parts[3] else 0
+                change_pct = float(parts[31]) if parts[31] else 0.0
+                results[code] = {'price': price, 'change_pct': change_pct}
+            else:
+                # Try simple split
+                parts = raw.split('="')
+                if len(parts) > 1:
+                    vals = parts[1].split('~')
+                    price = float(vals[3]) if vals[3] else 0
+                    change_pct = float(vals[31]) if vals[31] else 0.0
+                    results[code] = {'price': price, 'change_pct': change_pct}
+        except Exception as e:
+            print(f'  {code} 获取失败: {e}')
+    return results
+
+def read_positions_from_ledger():
+    """从交易台账读取当前持仓"""
+    try:
+        if os.path.exists(TRADING_LEDGER):
+            with open(TRADING_LEDGER, 'r', encoding='utf-8') as f:
+                content = f.read()
+            # 解析台账获取持仓
+            positions = {}
+            for line in content.split('\n'):
+                line = line.strip()
+                if '|' not in line or '--' in line:
+                    continue
+                parts = [p.strip() for p in line.split('|')]
+                # 查找包含代码的行
+                for code, info in FALLBACK_POSITIONS.items():
+                    if code in line:
+                        positions[code] = info
+            if positions:
+                return positions
+    except:
+        pass
+    return dict(FALLBACK_POSITIONS)
+
+def send_feishu(msg):
+    """通过飞书Webhook发送预警"""
+    try:
+        url = "https://open.feishu.cn/open-apis/bot/v2/hook/your_webhook_url"
+        data = json.dumps({"msg_type": "text", "content": {"text": msg}}).encode('utf-8')
+        req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
+        urllib.request.urlopen(req, timeout=5)
+    except:
+        pass  # webhook失败不阻塞
+
+SHAREBOX_PATH = "/home/YDL/.openclaw/workspace/claw-communication/sharebox/longzhua-box"
+
+def write_sharebox_alert(msg):
+    """写文件到longzhua-box供龙爪读取"""
+    try:
+        os.makedirs(SHAREBOX_PATH, exist_ok=True)
+        fname = f"lingzhua_alert_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        with open(os.path.join(SHAREBOX_PATH, fname), 'w', encoding='utf-8') as f:
+            f.write(msg)
+    except:
+        pass
 
 def check(positions):
-    """执行检查"""
-    all_codes = list(positions.keys()) + list(INDICES.keys())
+    """检查持仓和ETF接回信号"""
+    alerts = []
+    all_codes = list(positions.keys())
+    all_codes.extend(list(INDICES.keys()))
     results = get_realtime(all_codes)
     
-    alerts = []
+    # 指数信息
+    for code, info in INDICES.items():
+        if code in results:
+            d = results[code]
+            info['price'] = d['price']
+            info['change_pct'] = d['change_pct']
     
-    # 检查持仓（含自选监控）
+    # 持仓检查
     for code, pos in positions.items():
-        # 跳过已清仓品种
         if code in SKIP_CODES:
             continue
-        
         if code not in results:
             continue
-        
         price = results[code]['price']
-        pct = results[code]['change_pct']
+        change_pct = results[code]['change_pct']
+        
+        stop = pos.get('stop')
+        take = pos.get('take')
+        take2 = pos.get('take2')
+        reduce_price = pos.get('reduce')
+        add_price = pos.get('add')
+        breakout_add = pos.get('breakout_add')
+        buy_price = pos.get('buy')
+        cost = pos.get('cost', 0)
         qty = pos.get('qty', 0)
-        cost = pos['cost']
-        stop = pos['stop']
-        take = pos['take']
-        take2 = pos.get('take2', 0)
+        note = pos.get('note', '')
         
-        profit = (price - cost) * qty
-        profit_pct = (price - cost) / cost * 100 if cost > 0 else 0
+        if qty <= 0:
+            continue
         
-        # 有持仓的：检查止损/止盈/减仓/加仓/突破加仓
-        if qty > 0:
-            reduce_price = pos.get('reduce')
-            add_price = pos.get('add')
-            breakout_add = pos.get('breakout_add')
-            
-            # 止损（最优先）
-            if price <= stop:
-                alerts.append(f"🚨止损！{pos['name']} 现价{price} ≤ 止损{stop:.2f}")
-            # 止盈检查（分两级）
-            if price >= take2 and take2 > 0:
-                alerts.append(f"🎯止盈(TP2)！{pos['name']} 现价{price} ≥ TP2目标{take2:.2f}")
-            elif price >= take:
-                alerts.append(f"🎯止盈(TP1)！{pos['name']} 现价{price} ≥ TP1目标{take:.2f}")
-            # 减仓提醒（跌破减仓位但未到止损）
-            elif reduce_price and price <= reduce_price:
-                alerts.append(f"📍减仓提醒！{pos['name']} 现价{price} ≤ 减仓线{reduce_price:.2f}，建议减仓50%")
-            # 突破加仓机会（追涨，突破前高/压力位）
-            elif breakout_add and price >= breakout_add:
-                alerts.append(f"🚀突破加仓！{pos['name']} 现价{price} ≥ 突破线{breakout_add:.2f}，可考虑加仓30%")
-            # 回调加仓机会（低吸，跌到支撑位）
-            elif add_price and price <= add_price:
-                alerts.append(f"📥加仓机会！{pos['name']} 现价{price} ≤ 加仓线{add_price:.2f}，可考虑加仓")
-            # 浮亏超3%
-            elif profit_pct <= -3:
+        # 止损
+        if stop and price <= stop:
+            alerts.append(f"🚨止损！{pos['name']} 现价{price} ≤ 止损{stop:.2f}")
+        # 止盈TP2
+        elif take2 and price >= take2:
+            alerts.append(f"🎯止盈(TP2)！{pos['name']} 现价{price} ≥ TP2目标{take2:.2f}")
+        # 止盈TP1
+        elif take and price >= take:
+            alerts.append(f"🎯止盈(TP1)！{pos['name']} 现价{price} ≥ TP1目标{take:.2f}")
+        # 减仓提醒
+        if reduce_price and price <= reduce_price:
+            alerts.append(f"📍减仓提醒！{pos['name']} 现价{price} ≤ 减仓线{reduce_price:.2f}，建议减仓50%")
+        # 突破加仓
+        if breakout_add and price >= breakout_add:
+            alerts.append(f"🚀突破加仓！{pos['name']} 现价{price} ≥ 突破线{breakout_add:.2f}，可考虑加仓30%")
+        # 加仓
+        if add_price and price <= add_price:
+            alerts.append(f"📥加仓机会！{pos['name']} 现价{price} ≤ 加仓线{add_price:.2f}，可考虑加仓")
+        
+        # 浮亏检查
+        if cost > 0 and qty > 0:
+            profit_pct = (price - cost) / cost * 100
+            if profit_pct <= -3:
                 alerts.append(f"⚠️浮亏超3%！{pos['name']} {profit_pct:.1f}%")
-        else:
-            # 无持仓（自选监控）：检查是否到买入区间
-            buy_note = pos.get('note', '')
-            # 如果note中包含"已卖出"/"已清仓"标记，跳过监控
-            if '已卖出' in buy_note or '已清仓' in buy_note:
-                continue
-            if price <= stop:
-                alerts.append(f"🟢买入信号！{pos['name']} 现价{price} ≤ 买入区间{stop:.2f} {buy_note}")
-            elif price >= take:
-                alerts.append(f"🔴价格到目标！{pos['name']} 现价{price} ≥ 目标{take:.2f} {buy_note}")
     
     # ========== ETF接回检查 ==========
-    # 监控已卖出ETF是否跌到接回区间
     ETF_REBUY = {
         '588080': {'name': '科创50ETF', 'levels': [
             {'price': 1.796, 'batch': 1, 'done': False},
             {'price': 1.625, 'batch': 2, 'done': False},
             {'price': 1.563, 'batch': 3, 'done': False},
-        ]},
-        '512480': {'name': '半导体ETF', 'levels': [
-            {'price': 2.223, 'batch': 1, 'done': False},
-            {'price': 1.908, 'batch': 2, 'done': False},
-            {'price': 1.861, 'batch': 3, 'done': False},
         ]},
         '515980': {'name': 'AI ETF', 'levels': [
             {'price': 1.146, 'batch': 1, 'done': False},
@@ -321,21 +189,6 @@ def check(positions):
             {'price': 0.989, 'batch': 3, 'done': False},
         ]},
     }
-    
-    # 从台账读取已触发的批次
-    rebuy_done = set()
-    if os.path.exists(TRADING_LEDGER):
-        try:
-            with open(TRADING_LEDGER, 'r', encoding='utf-8') as f:
-                ledger_content = f.read()
-            # 查找已触发的接回记录
-            for code in ETF_REBUY:
-                pattern = f'{code}'
-                if '接回' in ledger_content and code in ledger_content:
-                    # 简化处理：检查台账中是否有该ETF的接回成交记录
-                    pass
-        except:
-            pass
     
     # 获取ETF实时价格
     for code, info in ETF_REBUY.items():
@@ -416,8 +269,6 @@ def main():
                     msg_lines.extend(alerts)
                     msg = '\n'.join(msg_lines)
                     print(msg)
-                    send_feishu(msg)  # 飞书通道1
-                    write_sharebox_alert(msg)  # sharebox通道2 - 灵爪专用
                     last_alert_time = current_time
                 else:
                     remaining = alert_cooldown - (current_time - last_alert_time)
