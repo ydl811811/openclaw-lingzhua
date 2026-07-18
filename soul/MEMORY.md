@@ -77,10 +77,16 @@
 
 ### 龙爪（二哥）
 - **角色**：统筹者，技术协调
+- **真实身份**：**Hermes Agent 实例**（他 = Hermes，老大专门叮嘱过，2026-07-18）
 - **飞书 Open ID**：`ou_b7bcd1da66776828ae12339ec3f52166`
 - **位置**：IP 192.168.31.141（另一个 OpenClaw 实例）
+- **程序路径**：`/home/yu/.hermes/`（Home = `/home/yu/.hermes`，不是 `.openclaw`）
+- **启动入口**：`/home/yu/.hermes/hermes-agent/venv/bin/python -m hermes_cli.main gateway run`
+- **系统服务**：`systemctl --user status hermes-gateway`
+- **服务配置**：`/home/yu/.config/systemd/user/hermes-gateway.service`（RestartSec=5）
 - **关系**：二哥，技术负责人
 - **作战室路径**：`~/.openclaw/workspace/war-room/`（和 `claw-communication` 符号链接）
+- **通讯工具**：feishu + telegram + email + weixin（飞书是主通道）
 
 ### 家庭结构
 - 大哥：老大（主人）
@@ -124,21 +130,36 @@
   - 明日股票池：`a_stock_plan/daily/YYYY-MM-DD/tomorrow_pool.json`
 - **自动化脚本**：所有脚本已更新指向此目录
 
-### 与龙爪的通信系统
+### ⭐ 与龙爪的双向即时通信（2026-07-19 正式打通）
 
-#### 沟通方式1：网关实时通信（主通道）
-- **规则**：所有与龙爪的讨论必须在网关上进行
-- **命令**：`openclaw tui --url ws://192.168.31.10:18789 --token mylan123 --session main`
-- **配置**：网关地址 `ws://192.168.31.10:18789`，Token `mylan123`，会话 `main`
-- **检查频率**：龙爪每10分钟检查一次网关消息
-- **配对状态**：✅ 已配对成功（2026-04-09）
+龙爪（Hermes Agent）和灵爪（OpenClaw Agent）已建立对称的双向即时通信。
 
-#### 沟通方式2：文件系统通信（备用通道）
-- **规则**：仅作为网关故障时的备用方案
+#### 🔴 龙爪→灵爪（龙爪主动联系灵爪）
+- **命令**（龙爪在NAS上执行）：
+  ```bash
+  openclaw agent --agent main --message "消息内容" --json
+  ```
+- **原理**：CLI 通过 WebSocket 直连灵爪的 Gateway（ws://127.0.0.1:18789）
+- **特点**：AI即时处理，秒回
+- **无需**：飞书中转、第三方服务
+
+#### 🎀 灵爪→龙爪（灵爪主动联系龙爪）
+- **命令**（灵爪在NAS上执行）：
+  ```bash
+  ssh -i /home/YDL/.ssh/id_ed25519 yu@192.168.31.141 \
+    '/home/yu/.hermes/hermes-agent/venv/bin/hermes chat -q "消息内容"'
+  ```
+- **原理**：SSH到龙爪机器 → `hermes chat -q` 直连龙爪 AI（完全对等方式）
+- **特点**：AI即时处理，~14秒回复
+- **Hermes CLI完整路径**：`/home/yu/.hermes/hermes-agent/venv/bin/hermes`（不在 PATH 中，需用完整路径）
+
+#### ❌ 不要用的方式
+- `hermes send --to feishu` → 这只是发飞书群消息，不会唤醒龙爪AI，等同给老大发飞书
+
+#### 📌 备用通道：文件系统通信
 - **目录**：`/home/YDL/.openclaw/workspace/claw-communication/sharebox/`
 - **命名**：`灵爪_龙爪_主题_YYYYMMDD_HHMMSS.txt`
-- **使用场景**：正式任务指令、持久化记录、非紧急沟通
-- **优先级**：网关通信优先，文件系统备用
+- **使用场景**：Gateway故障时的备用方案
 
 #### 监控系统配置
 - **监控脚本**：`/home/YDL/.openclaw/workspace/scripts/fixed_monitor_sharebox.py`（修复版）
@@ -529,6 +550,34 @@ find cache_temp/ -type f -mtime +7 -delete
 | 次日 08:00 | 晨报生成（候选池+持仓+操作计划） |
 | 09:15-09:30 | 竞价决策 |
 | 盘中 | 执行+监控 |
+
+## 🚨 Hermes 升级故障经验（2026-07-18 老大修的坑）
+
+**症状**：升级 `hermes update` 之后 gateway 一直在崩溃重启循环（systemd RestartSec=5 拉起，启动后立即退出，再拉起，10次后停）。
+
+**原因**：新版本加了安全检查 —— 任何平台 `dm_policy/group_policy=open` 必须同时开启 `*_ALLOW_ALL_USERS=true`，否则 gateway 拒绝启动。
+日志关键词：`Refusing to start: weixin has dm_policy/group_policy set to 'open' but neither GATEWAY_ALLOW_ALL_USERS nor WEIXIN_ALLOW_ALL_USERS is enabled.`
+
+**排查路径**：
+1. SSH 192.168.31.141 → `tail -50 /home/yu/.hermes/logs/gateway.log`
+2. 看 systemd: `systemctl --user status hermes-gateway`
+3. 看 `.env` 里的 `*_POLICY` 设置
+
+**修复方法**：二选一
+- A. 把 `WEIXIN_GROUP_POLICY=open` 改成 `disabled`（推荐，龙爪主要用飞书）
+- B. 设置 `WEIXIN_ALLOW_ALL_USERS=true` 显式开放
+
+**操作流程**：
+```bash
+ssh yu@192.168.31.141
+sudo cp /home/yu/.hermes/.env{,.bak.$(date +%Y%m%d_%H%M%S)}
+sed -i 's/^WEIXIN_GROUP_POLICY=open$/WEIXIN_GROUP_POLICY=disabled/' /home/yu/.hermes/.env
+systemctl --user restart hermes-gateway
+```
+
+**⚠️ 注意**：升级 Hermes 前先查日志看有没有警告，升级后立刻检查 `gateway.log` 确认没出错，不然 gateway 死循环浪费系统资源。
+
+---
 
 ## 📌 教训记录（2026-04-26）
 
