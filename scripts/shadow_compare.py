@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Loop Engineer - P3 影子模式对比报告生成器（最终交付）
+玲珑股票交易系统 (旧 Loop Engineer, 归档旧名) - P3 影子模式对比报告生成器（最终交付）
 按 D2 任务规格 + 二哥 20:36 P3 完整规格
 6 维度对比 + Markdown + ASCII 表格，≤ 200 行
 
@@ -274,7 +274,7 @@ def render_markdown(date: str, metrics: dict, active: dict, shadow: dict) -> str
         md.append(f"| {key} | {a_v} | {s_v} | {s_v - a_v if isinstance(a_v, (int, float)) and isinstance(s_v, (int, float)) else '—'} |")
 
     md.append("\n---\n")
-    md.append("_报告生成：Loop Engineer P3 影子模式对比_")
+    md.append("_报告生成：玲珑股票交易系统 (旧 Loop Engineer, 归档旧名) P3 影子模式对比_")
     md.append(f"_数据源：active={active.get('version', 'unknown')}, shadow={shadow.get('version', 'unknown')}_")
 
     return "\n".join(md)

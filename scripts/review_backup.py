@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Loop Engineer - P2 复盘数据备份脚本（按二哥 20:30 拍板）
+玲珑股票交易系统 (旧 Loop Engineer, 归档旧名) - P2 复盘数据备份脚本（按二哥 20:30 拍板）
 按 D2 任务规格：NAS 本地 trading-review/ → 本地 bare repo
 - 每日 15:30 全量自动
 - journal/ 新增 .md 时增量

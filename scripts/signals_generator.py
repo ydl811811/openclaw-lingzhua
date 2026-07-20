@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Loop Engineer - P3 子脚本 2/2：综合信号生成器（按二哥 20:53 拍板 B）
+玲珑股票交易系统 (旧 Loop Engineer, 归档旧名) - P3 子脚本 2/2：综合信号生成器（按二哥 20:53 拍板 B）
 按 D2 任务规格：融合 P0 RSS 新闻因子 + P1 K线技术因子 → 信号记录
 落地路径：/home/YDL/.openclaw/workspace/trading-review/signals/signals-YYYYMMDD.json
 

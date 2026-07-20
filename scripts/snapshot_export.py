@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Loop Engineer - P3 子脚本 1/2：持仓快照导出器（按二哥 20:53 拍板 B）
+玲珑股票交易系统 (旧 Loop Engineer, 归档旧名) - P3 子脚本 1/2：持仓快照导出器（按二哥 20:53 拍板 B）
 按 D2 任务规格：从 a_stock_plan/交易记录台账.md 自动导出持仓快照
 落地路径：/home/YDL/.openclaw/workspace/trading-review/positions/snapshot-YYYYMMDD.csv
 

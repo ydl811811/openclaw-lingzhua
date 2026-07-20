@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Loop Engineer - P1 历史 K 线缓存脚本（v3，按二哥 20:43 拍板切 baostock）
+玲珑股票交易系统 (旧 Loop Engineer, 归档旧名) - P1 历史 K 线缓存脚本（v3，按二哥 20:43 拍板切 baostock）
 按 D2 任务规格：缓存 A 股日线，减少 API 调用
 存储：SQLite /home/YDL/.openclaw/workspace/loop_engineer/kline_cache.db
 
