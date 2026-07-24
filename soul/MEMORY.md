@@ -822,68 +822,44 @@ sessions_spawn(
 
 ---
 
-## 🔄 玲珑股票交易系统项目转交（2026-07-19 22:26 老大飞书亲口）
+## 🚫 玲珑股票交易系统已隔离（2026-07-24 17:08 老大飞书亲口拍板）
 
-- **老大原话**：「玲珑股票交易系统项目已经搞完，我让龙爪把项目都存放在了 nas 上，你以后要照顾好这个项目。」
-- **项目位置**：nas = `/home/YDL/.openclaw/workspace/loop_engineer/`
-- **照顾人**：灵爪（小妹）
+- **老大原话**：「我不要了，你隔离吧，你以前用的老的股票交易系统继续服务。」
+- **隔离路径**：`/home/YDL/.openclaw/workspace/.isolated/loop_engineer_20260724/`
+  - `loop_engineer_link` - 原软链接（指向 `/home/YDL/loop_engineer/`）
+  - `scripts/` - 5 个玲珑相关脚本（kline_cache / review_backup / snapshot_export / signals_generator / shadow_compare）
+  - `logs_isolated/` - 4 个日志（news_fetcher / kline_cache / review_backup / shadow_compare）
+  - `隔离报告.md` - 完整隔离报告 + 恢复方法
+- **cron 已清理**：4 条玲珑相关任务全部删除（备份在 `/tmp/cron.full.bak.20260724_1708.txt`）
+- **进程已检查**：无任何玲珑相关运行中进程
+- **老的系统继续服务**：`scripts/auto_stock_alert.py` + `morning_briefing_auto.py` + `pre_market_strategy.py` + `auto_daily_review.py` + `scheduler.py` + 5 条老 cron + 整个 `a_stock_plan/` 目录全部保留
 
-### 项目资产清单
-| 类别 | 路径 |
-|---|---|
-| 工作目录 | `/home/YDL/.openclaw/workspace/loop_engineer/` |
-| NAS 侧脚本 | `/home/YDL/.openclaw/workspace/scripts/{kline_cache,review_backup,snapshot_export,signals_generator,shadow_compare}.py` |
-| K线缓存 DB | `/home/YDL/.openclaw/workspace/loop_engineer/kline_cache.db` |
-| 交易日数据 | `/home/YDL/.openclaw/workspace/loop_engineer/news_cache/` + `trading-review/{positions,signals,shadow_compare}/` |
-| bare 仓库 | `/home/YDL/.openclaw/workspace/bare-repos/trading-review.git` |
-| Playbooks | `/home/YDL/.openclaw/workspace/loop_engineer/playbooks/{playbook_active,playbook_shadow}.yaml` |
-
-### cron 时间表（交易日 1-5）
-| 时间 | 脚本 | 任务 |
-|---|---|---|
-| 09:00 | loop_engineer/news_fetcher.py | P0 RSS 新闻抓取 |
-| 15:30 | scripts/kline_cache.py | P1 历史 K 线缓存 |
-| 15:33 | scripts/review_backup.py | P2 复盘数据备份 |
-| 16:30 | scripts/shadow_compare.py | P3 影子模式对比报告 |
-
-### 长期维护职责
-1. **健康监控**：每天盘前看一遍 4 个 log（`logs/news_fetcher.log / kline_cache.log / review_backup.log / shadow_compare.log`）
-2. **异常处理**：akshare/baostock API 失败自动重试 ≤3 次，否则记日志等下周自检时再处理
-3. **数据归档**：trading-review/journal/ 60 天前自动归档到 archive/YYYY-MM/
-4. **项目升级**：等龙爪（统筹）拍板才迭代，灵爪不主动改方案/参数
-5. **实盘边界**：active Playbook 是实盘基准，灵爪绝不擅自改参数或调整持仓
-6. **故障上报**：项目问题 → SSH hermes chat 找二哥；架构重大调整 → 找老大
-
-### 周自检节奏（建议）
-- 每周一 09:30：检查上周 4 个 cron 的 log，看有无异常 → 飞书汇报给老大
-- 每月最后一周：review trading-review.git 仓库大小，决定是否触发 git gc --aggressive
-
-### 与老大的沟通边界
-- 不主动汇报日常运行状态（除非老大问了）
-- ❌ 不主动改 cron 时间表 / 不主动改 Playbook 参数 / 不主动改重试策略
-- ✅ 重大异常（连续 3 天 cron 全失败 / 数据源持续不可用）→ 主动汇报老大
+---
 
 
 ---
 
-## 🎯 A 股交易系统持续优化（新主线 - 2026-07-19 22:32 老大亲口拍板）
+## 🎯 A 股交易系统持续优化（长期主线 - 2026-07-19 22:32 老大亲口拍板）
 
 - **老大原话**：「我觉得可以，你需要持续优化我们的股票交易系统。」
-- **新主线**：在照顾 玲珑股票交易系统项目之外，灵爪新增**长期主线任务**——持续优化 A 股交易系统
+- **范围**：基于老的股票交易系统（auto_stock_alert / morning_briefing / pre_market_strategy / auto_daily_review）持续迭代
 - **节奏**：
-  - 每日：用 玲珑股票交易系统数据加速现有 SOP（早报/选股/复盘）
+  - 每日：早报 + 选股 + 复盘
   - 每周日：复盘 + 优化清单
   - 每月底：策略小版本迭代
   - 每季度：三轨 SOP 大版本
 
-### 优化层级（从基础设施到决策智能）
-1. **基础设施层**（已就位）✅ P0/P1/P2/P3 全部上线
-2. **流程效率层**（短期）早报自动化 + 选股 SOP 读缓存 + 复盘自动同步
+### 优化层级
+1. **基础设施层** ✅ 老的 cron + 调度器全部就位
+2. **流程效率层**（短期）早报自动化 + 选股 SOP 优化 + 复盘自动同步
 3. **策略质量层**（中期）三轨评分模型迭代 + 板块轮动监控 + 历史回测框架
 4. **决策智能化层**（长期）多周期信号融合 + 仓位动态管理 + 行业轮动预测
 
 ### 权限边界
 - ✅ 小优化（参数微调 / 流程加速 / 脚本优化）→ 灵爪直接做
 - ⚠️ 中等变更（新数据源 / 新评分逻辑 / 新 cron）→ SSH hermes chat 找龙爪拍板
-- 🚨 大调整（改三轨 SOP / 改实盘规则 / 改 Playbook）→ 老大 + 龙爪拍板
+- 🚨 大调整（改三轨 SOP / 改实盘规则）→ 老大 + 龙爪拍板
 
+---
+
+**最后更新**：2026-07-24 17:09

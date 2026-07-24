@@ -261,42 +261,6 @@ def get_tushare_hsgt(trade_date):
         return None
 
 
-def get_realtime_quote(codes):
-    """从 tushare replay 获取今日实时行情（多股）
-    参数 codes: ['000001.SZ', '000533.SZ', ...]
-    返回: {ts_code: {open, close, pre_close, change, pct_chg, vol, amount}}
-    """
-    if not codes:
-        return {}
-    try:
-        cli = TushareClient()
-        today = datetime.now().strftime('%Y%m%d')
-        result = {}
-        # 逐只拉最近 2 天，取最新一天数据（盘中是当前快照，收盘后是最终价）
-        for ts_code in codes:
-            try:
-                df = cli.daily(ts_code=ts_code, start_date=today, end_date=today, __cache_ttl=60)
-                if df is None or df.empty:
-                    continue
-                row = df.iloc[0]
-                result[ts_code] = {
-                    'open': float(row.get('open', 0) or 0),
-                    'close': float(row.get('close', 0) or 0),
-                    'pre_close': float(row.get('pre_close', 0) or 0),
-                    'change': float(row.get('change', 0) or 0),
-                    'pct_chg': float(row.get('pct_chg', 0) or 0),
-                    'vol': float(row.get('vol', 0) or 0),      # 手
-                    'amount': float(row.get('amount', 0) or 0), # 千元
-                }
-            except Exception as e:
-                print(f"  {ts_code} 实时行情获取失败: {e}")
-                continue
-        return result
-    except Exception as e:
-        print(f"  tushare 实时行情获取失败: {e}")
-        return {}
-
-
 def get_yesterday_summary():
     """获取昨日市场总结（优先从市场数据汇总文件，其次从复盘报告，失败则从adata获取）"""
     yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
@@ -563,72 +527,6 @@ def generate_report():
     
     now = datetime.now()
     today_str = now.strftime('%Y-%m-%d')
-
-    # 辅助函数（需要闭包 tushare_quotes 和 _norm_code）
-    def _norm_code(code):
-        """归一化为 tushare 格式 XXXXXX.SH/SZ/BJ
-        支持输入：
-          - sh600519 / sz000001 / bj920305
-          - 002387（纯 6 位数字，需根据首位推断交易所）
-          - 600519.SH / 000001.SZ（已带后缀）
-        """
-        code = str(code).strip()
-        if not code:
-            return ''
-        lower = code.lower()
-        # 已带后缀
-        if '.' in lower:
-            parts = lower.split('.')
-            return f"{parts[0]}.{parts[1].upper()}"
-        # 带前缀
-        if lower.startswith(('sh', 'sz', 'bj')):
-            prefix = lower[:2].upper()
-            return f"{lower[2:]}.{prefix}"
-        # 纯数字推断
-        if code.isdigit() and len(code) == 6:
-            if code.startswith(('60', '68', '90', '51', '56')):  # 沪市 + 科创板 + 部分基金
-                return f"{code}.SH"
-            elif code.startswith(('00', '30', '20')):  # 深市 + 创业板
-                return f"{code}.SZ"
-            elif code.startswith(('4', '8', '92')):  # 北交所
-                return f"{code}.BJ"
-        # 兜底：原样返回大写
-        return code.upper()
-
-    def _format_quote_row(s):
-        """候选股表格行（含今日实时数据）"""
-        q = tushare_quotes.get(_norm_code(s['code']), {})
-        if q and q.get('open') is not None:
-            pct = q.get('pct_chg')
-            pct_str = f"+{pct:.2f}%" if pct is not None and pct >= 0 else f"{pct:.2f}%"
-            return (
-                f"| {s['name']} | {s['code']} | {q['open']} | "
-                f"{q['pre_close']} | {q['close']} ({pct_str}) | "
-                f"{s.get('theme', '-')} | {s.get('score', '-')} | {s.get('note', '-')} |"
-            )
-        return (
-            f"| {s['name']} | {s['code']} | - | - | - | "
-            f"{s.get('theme', '-')} | {s.get('score', '-')} | {s.get('note', '-')} |"
-        )
-
-    def _format_position_row(p):
-        """持仓表格行（含今日实时数据）"""
-        q = tushare_quotes.get(_norm_code(p['code']), {})
-        if q and q.get('open') is not None:
-            today_open = q['open']
-            pre_close = q['pre_close']
-            pct = q.get('pct_chg')
-            today_chg = f"{pct:+.2f}%" if pct is not None else '-'
-            mark = ' 🔥涨停' if pct is not None and pct >= 9.5 else (' ⚠️跌停' if pct is not None and pct <= -9.5 else '')
-            return (
-                f"| {p['name']} | {p['code']} | {p['cost']:.3f} | "
-                f"{today_open}({pre_close}) | {p['current_price']:.2f} | {p['pnl_pct']:+.2f}% | "
-                f"{today_chg}{mark} | {p['status']} |"
-            )
-        return (
-            f"| {p['name']} | {p['code']} | {p['cost']:.3f} | "
-            f"- | {p['current_price']:.2f} | {p['pnl_pct']:+.2f}% | - | {p['status']} |"
-        )
     time_str = now.strftime('%H:%M')
     
     # 1. 夜间新闻
@@ -734,48 +632,7 @@ def generate_report():
         TOTAL_CAPITAL = 50000
         positions['position_ratio'] = f"{total_value/TOTAL_CAPITAL*100:.1f}%"
         positions['cash'] = TOTAL_CAPITAL - total_value
-
-    # 5.5 tushare 今日实时行情（持仓 + 候选股）
-    print("📈 tushare 今日实时行情（持仓 + 候选）...")
-
-    # 汇总需要拉行情的代码
-    need_quote_codes = set()
-    if positions.get('positions'):
-        for p in positions['positions']:
-            need_quote_codes.add(_norm_code(p['code']))
-    for s in candidate_pool.get('short', []) + candidate_pool.get('long', []):
-        need_quote_codes.add(_norm_code(s['code']))
-
-    tushare_quotes = get_realtime_quote(list(need_quote_codes)) if need_quote_codes else {}
-    print(f"  tushare 拿到 {len(tushare_quotes)} 只票的今日数据")
-
-    # 预计算 template.format() 需要的表格字符串（避免 f-string 依赖未赋值的 keyword arg）
-    short_stocks='\n'.join([
-        _format_quote_row(s)
-        for s in candidate_pool['short']
-    ]) or '| - | - | - | - | - | - | - | - |'
-
-    long_stocks='\n'.join([
-        _format_quote_row(s)
-        for s in candidate_pool['long']
-    ]) or '| - | - | - | - | - | - | - | - |'
-
-    candidate_zones=(
-        "### 短线候选\n"
-        "| 名称 | 代码 | 今开 | 昨收 | 最新 | 题材 | 评分 | 备注 |\n"
-        "|------|------|------|------|------|------|------|------|\n"
-        f"{short_stocks}\n\n"
-        "### 长线候选\n"
-        "| 名称 | 代码 | 今开 | 昨收 | 最新 | 题材 | 评分 | 备注 |\n"
-        "|------|------|------|------|------|------|------|------|\n"
-        f"{long_stocks}"
-    )
-
-    positions_str='\n'.join([
-        _format_position_row(p)
-        for p in positions['positions']
-    ]) or '| - | - | - | - | - | - | - | - |'
-
+    
     # 6. 读取模板
     with open(TEMPLATE_FILE, 'r', encoding='utf-8') as f:
         template = f.read()
@@ -815,18 +672,26 @@ def generate_report():
         hsgt_sell=yesterday_data.get('hsgt_sell', '-'),
         hot_sectors=yesterday_data.get('limit_pool_str', yesterday_data.get('hot_sectors', '暂无数据')),
         dragon_tiger=yesterday_data.get('top_list_str', yesterday_data.get('dragon_tiger', '暂无数据')),
-
-        # 候选股票池（含今日实时数据）—— 上面已预计算 short_stocks/long_stocks/candidate_zones
-        candidate_zones=candidate_zones,
-
+        
+        # 候选股票池
+        short_stocks='\n'.join([
+            f"| {s['name']} | {s['code']} | {s.get('theme', '-')} | {s.get('score', '-')} | {s.get('note', '-')} |"
+            for s in candidate_pool['short']
+        ]) or '| - | - | - | - | - |',
+        
+        long_stocks='\n'.join([
+            f"| {s['name']} | {s['code']} | {s.get('theme', '-')} | {s.get('score', '-')} | {s.get('note', '-')} |"
+            for s in candidate_pool['long']
+        ]) or '| - | - | - | - | - |',
+        
+        candidate_zones=f"### 短线候选\n| 名称 | 代码 | 题材 | 评分 | 备注 |\n|------|------|------|------|------|\n{short_stocks}\n\n### 长线候选\n| 名称 | 代码 | 题材 | 评分 | 备注 |\n|------|------|------|------|------|\n{long_stocks}",
         candidate_notes="备注：候选股池根据最新选股结果生成，仅供参考，不构成投资建议。",
 
-        # 监控脚本状态
-        monitor_pid='-',
-        monitor_update_time='-',
-
-        # 持仓（含今日实时数据）—— 上面已预计算 positions_str
-        positions=positions_str,
+        # 持仓
+        positions='\n'.join([
+            f"| {p['name']} | {p['code']} | {p['cost']:.3f} | {p['current_price']:.2f} | {p['pnl_pct']:+.2f}% | - | {p['status']} |"
+            for p in positions['positions']
+        ]) or '| - | - | - | - | - | - | - |',
         
         total_value=f"{positions['total_value']:.2f}",
         position_ratio=positions['position_ratio'],
