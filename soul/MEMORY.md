@@ -856,3 +856,26 @@ sessions_spawn(
 ---
 
 **最后更新**：2026-07-24 17:09
+
+---
+
+## 🧠 Agnes AI 模型接入教训（2026-07-28 老大亲自端到端打通）
+
+- **核心区分（必须记牢）**：
+  - `platform.agnes-ai.com` = 用户登录/网页平台（**不是 API endpoint**）
+  - `apihub.agnes-ai.com`    = 真正的 API 网关（**models.json 里要写这个**）
+- **老大原话**（17:15 飞书私信）："agnes endpoint: https://apihub.agnes-ai.com/v1"
+- **坑**：第一次 models.json 把 baseUrl 写成了 `platform.agnes-ai.com/v1`，一直 ping 不通。老大指正后，域名改为 `apihub.agnes-ai.com/v1` 立刻成功。
+- **教训**：
+  1. 不要凭直觉猜 API 域名，要去官方文档/老大直接告诉的源确认
+  2. `models.json` 改完不一定立即生效，常常要 `openclaw gateway restart` 或等热加载
+  3. `web_fetch` 抓 `platform.agnes-ai.com` 会返回 "Blocked: resolves to private/internal/special-use IP"，因为它确实不是公开 API 域名，是内部分流
+  4. `web_search` 找的是第三方教程，常把 platform/apihub 混着写，**不可全信**
+- **配置现状**（~/.openclaw/agents/main/agent/models.json agnes provider）：
+  - baseUrl = `https://apihub.agnes-ai.com/v1`
+  - api = `openai-completions`
+  - apiKey 前缀 `sk-Go0xH...GmBPNT10`
+  - 7 个 models：agnes-1.5-flash / agnes-2.0-flash / **agnes-2.5-flash**（⭐ 老大点的）/ agnes-2.5-pro-alpha / agnes-image-2.0-flash / agnes-image-2.1-flash / agnes-video-v2.0
+- **大小写敏感**：必须小写连字符 `agnes-2.5-flash`；`Agnes-2.5-Flash` 大写会 model_not_found
+- **验证方法**：`curl -H "Authorization: Bearer $KEY" https://apihub.agnes-ai.com/v1/models` 列全部可调 model id
+- **归档位置**：`a_stock_plan/archive/2026-07/models.json_OLD_agnes_baseurl_*`、`models.json_after_agnes_baseurl_fix_*`、`models.json_AFTER_agnes_25_addition_*`、`UPDATES.md`
