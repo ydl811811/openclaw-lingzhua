@@ -879,3 +879,90 @@ sessions_spawn(
 - **大小写敏感**：必须小写连字符 `agnes-2.5-flash`；`Agnes-2.5-Flash` 大写会 model_not_found
 - **验证方法**：`curl -H "Authorization: Bearer $KEY" https://apihub.agnes-ai.com/v1/models` 列全部可调 model id
 - **归档位置**：`a_stock_plan/archive/2026-07/models.json_OLD_agnes_baseurl_*`、`models.json_after_agnes_baseurl_fix_*`、`models.json_AFTER_agnes_25_addition_*`、`UPDATES.md`
+
+---
+
+## 🎯 A 股数据源分工原则（2026-07-31 老大明确拍板，必须牢记！）
+
+### ⚠️ 核心原则（一句话）
+
+- 📜 **历史数据**（K线回测/财务/北向/板块/龙虎榜） → 用 **咸鱼tushare镜像接口**
+- 📡 **盘中实时**（现价/5档/止损监控/加仓触发） → 用 **stock_quote.py 三源聚合**
+
+### 📜 历史数据源：咸鱼tushare镜像接口
+
+| 项目 | 配置 |
+|------|------|
+| 镜像站 | `https://ai-tool.indevs.in/tushare/pro` |
+| API Key | `huanghanchi`（咸鱼买的，老大 2026-07-24 给） |
+| 客户端 | `/home/YDL/.openclaw/workspace/scripts/tushare_client.py` |
+| 本地缓存 | `/home/YDL/.openclaw/workspace/cache_temp/tushare_replay/`（1小时TTL） |
+| 数据延迟 | **T+1**（最新只能拉到昨日收盘） |
+| 支持接口 | daily / fund_daily / index_daily / moneyflow_hsgt / limit_list_d / top_list / ths_index / ths_member / income / fina_indicator 等30+ |
+
+### 📡 盘中实时数据源：stock_quote.py 三源聚合
+
+| 数据源 | 用途 |
+|-------|------|
+| 腾讯 qt.gtimg.cn | 实时行情 + 5档（盘中首选） |
+| 新浪 hq.sinajs.cn | 实时行情 + 集合竞价 prev_close 准 |
+| 东方财富 push2.eastmoney.com | 批量报价（多股最快） |
+
+| 项目 | 配置 |
+|------|------|
+| 客户端 | `/home/yu/.hermes/scripts/stock_quote.py`（龙爪机器） |
+| 调用方式 | SSH 192.168.31.141 调用 |
+| 延迟 | **实时**（秒级） |
+
+### 📊 数据源决策表
+
+| 场景 | 用哪个 |
+|------|--------|
+| 盘中"现价多少？" | 📡 **stock_quote**（实时） |
+| 收盘后"今天涨了多少？" | 📜 **tushare** daily（T+1） |
+| "这只票历史走势？" | 📜 **tushare** daily |
+| "今天涨停了哪些？" | 📜 **tushare** limit_list_d |
+| "北向今天净流入？" | 📜 **tushare** moneyflow_hsgt |
+| "现在该不该止损？" | 📡 **stock_quote**（实时） |
+| "基本面怎么样？" | 📜 **tushare** fina_indicator |
+| "板块成分股？" | 📜 **tushare** ths_member |
+| 盘中"加仓信号触发了吗？" | 📡 **stock_quote**（实时） |
+| "回测过去30天走势？" | 📜 **tushare** daily |
+
+### 🚨 绝对不能再犯的反面案例
+
+- ❌ **跑去看龙爪机器的 `/home/yu/.hermes/cache/stock_data/xianyu_tushare/`** → 那是龙爪自己备份的旧副本，不是数据源！
+- ❌ **用 tushare 拉盘中现价** → tushare 只有 T+1 数据，盘中最新的永远是昨天的收盘价！
+- ❌ **用 stock_quote 拉长期历史K线** → 只能拉最近120天左右的数据，回测不够用！
+
+### 📌 同时也写进了 TOOLS.md
+
+完整版（含详细配置 + 接口列表 + 适用场景）已追加到 `/home/YDL/.openclaw/workspace/TOOLS.md` 末尾，长期持久化。
+
+---
+
+## 📌 7-31 持仓台账大修正（血泪教训，必看！）
+
+### 事件回顾
+- **错误**：12 天未同步龙爪 `monitor_positions.yaml`，导致我的台账里 7 只已清仓股票被错误挂为"持有"
+- **触发**：老大 11:39 飞书提醒"你的持仓台账已经不对了，因为我们好几天没有交流更新股票了"
+- **解决**：从龙爪机器拉 `monitor_positions.yaml` → 重写台账 → 同步监控脚本 → 归档错误版
+
+### 真实持仓（7-31 重写后）
+- 513050 中概互联ETF：9500份 @1.1164（7-31加仓4500@1.129）
+- 513120 港股创新药ETF：4000份 @1.174
+- 159326 电网设备ETF：2000份 @1.600（7-24第1批/共4批）
+- 159299 金融科技ETF：3000份 @0.711 ⭐7-31试探仓进攻
+
+### 防呆机制（每日强制同步）⚠️ 2026-07-31 升级：从每周日 → 每天
+1. **每日收盘后强制同步龙爪 monitor_positions.yaml**（老大亲口拍板）
+2. **老大报单后立即触发台账更新检查**
+3. **每天启动监控前核对台账 mtime vs 当前日期**
+4. **错误版台账已归档**：`a_stock_plan/archive/2026-07/交易记录台账_错误版_20260731_pre_correct.md`
+5. **同步脚本位置**：`scripts/sync_positions_from_longzhua.py`（待建）
+6. **同步源路径**：`ssh yu@192.168.31.141 /home/yu/.hermes/stock-portfolio/monitor_positions.yaml`
+
+### 错误源数据记忆
+- ❌ `/home/yu/.hermes/cache/stock_data/xianyu_tushare/initial_cache_20260724.json` 是龙爪的**旧缓存副本**，不是数据源
+- ❌ 跑去 SSH 龙爪机器看缓存 = 跑偏（老大已纠正）
+
