@@ -168,6 +168,18 @@
   - **SSH密钥**：`/home/YDL/.ssh/id_ed25519`（Ed25519私钥）
   - **连接命令**：`ssh -i /home/YDL/.ssh/id_ed25519 yu@192.168.31.141`
   - **文件传输命令**：`scp -i /home/YDL/.ssh/id_ed25519 <本地文件> yu@192.168.31.141:<远程路径>`
+
+### ⭐ 灵爪→龙爪文件通道铁律（2026-08-01 老大亲口定）
+- **路径**：`ssh yu@192.168.31.141 '~/.hermes/inbox/'`（**统一信箱**）
+- **写入方式**：scp（**不要 cp**，跨 SSH cp 会找不到文件）
+- **不要写到**：
+  - ❌ 龙爪 sshfs 挂载点 `remote_lingzhua/`（fuse I/O 错误）
+  - ❌ sharebox/longzhua-box（备份通道，不是通知通道）
+  - ❌ hermes chat（Ctrl+C 会中断，不是稳定通道）
+- **示例**：`scp -i /home/YDL/.ssh/id_ed25519 /tmp/xxx.md yu@192.168.141:/home/yu/.hermes/inbox/灵爪_龙爪_主题_YYYYMMDD_HHMMSS.md`
+- **命名规范**：`灵爪_龙爪_主题_YYYYMMDD_HHMMSS.md`
+- **2026-08-01 20:37 老大原话**：「记住这个信箱，以后给龙爪发消息，就发到那边」
+
 - **OpenClaw网关**：
   - **服务端口**：18789
   - **启动命令**：`openclaw gateway start`
