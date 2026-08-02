@@ -978,3 +978,44 @@ sessions_spawn(
 - ❌ `/home/yu/.hermes/cache/stock_data/xianyu_tushare/initial_cache_20260724.json` 是龙爪的**旧缓存副本**，不是数据源
 - ❌ 跑去 SSH 龙爪机器看缓存 = 跑偏（老大已纠正）
 
+
+---
+
+## 🧠 a-stock-data 环境排查教训（2026-08-02 老大亲口拍板：周一验证）
+
+### 真相
+- **家庭网络/Nikki/旁路由 50/141/NAS 默认出网 IP = `207.56.226.188`（日本 VPS）** — 这是 Nikki 给国外网站（api.ipify.org 等）的代理出口，**完全正常**
+- **国内网站（push2.eastmoney.com）走 DIRECT，直连中国机房** — ping 14ms、HTTP 404 是真实业务响应
+- **东财 HTTP 404 = 服务在跑，只是接口路径/参数/Header 不对** — 不是网络问题
+
+### a-stock-data 真实卡点（重新定位）
+| 假说 | 状态 |
+|---|---|
+| 家里出网走日本 VPS | ❌ 错（只是国外网站代理） |
+| Tailscale exit node 劫持 | ❌ 错（141 没开 AllowExit） |
+| TailscaleSSH 阻断 | ❌ 错（141 没 RunSSH） |
+| 旁路由 50 Meta 接口劫持 | ❌ 错（Meta=mihomo TUN 模式，DIRECT 规则生效） |
+| **东财 push2 接口风控（UA/Referer/路径）** | ✅ **真凶** — 8-1 龙爪已确认 getTopicZTPool 等端点修正，a-stock-limitup/board 还在 stub |
+| **非交易时段返回空** | ✅ 周日 10:15 测的，非盘中 |
+
+### 解决路径（老大拍板：周一验证）
+- **2026-08-04（周一）09:30 盘中**，让龙爪浏览器抓包 push2.eastmoney.com 真实 Header + 路径
+- 不需要改环境 / 不需要 tailscale down / 不需要动 Nikki
+- 环境方案 A/B/C/D **全部作废**
+
+### 教训（防止下次再犯）
+- ❌ **不要用 `curl https://api.ipify.org` 判断"国内通不通"** — 这是国外网站，出口是代理
+- ✅ **要测国内 → 直接 `curl -v https://push2.eastmoney.com`**，看 TCP+TLS+HTTP 响应
+- ❌ **不要看到 404 立刻报"走日本"** — 4xx 是 HTTP 业务响应，不是网络错
+- ❌ **不要看到 `api.ipify.org` 返回日本 IP 就下结论"全局走日本"** — 国内网站走 DIRECT 才会直连
+- ✅ **误判案例完整记录**：
+  - 我前面 12 小时追"日本 VPS 劫持"，跑了 6 次 curl、traceroute、mtr，挖到 Meta 接口，看到"国外网站出网日本"就下结论
+  - 老大 09:51 问"国内直连怎么走日本？" → 一问把我拉回，DNS 解析 + curl -v 显示真实路径在国内
+  - **根因**：测试样本错了（拿国外网站测国内网络）
+
+### 行动项
+- [ ] 2026-08-04（周一）09:30 之后：龙爪浏览器抓包 push2.eastmoney.com 真实请求
+- [ ] a-stock-data 限流函数 em_get 在 fetch_data.py 跑通真实涨停池
+- [ ] 灵爪同步结论给老大（不主动 SSH 催龙爪，等周一自己回来）
+
+**最后更新**：2026-08-02 10:18
