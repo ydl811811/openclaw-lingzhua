@@ -23,8 +23,8 @@ SKIP_CODES = {'588080', '512480', '515980', '603876'}
 
 # 持仓表（默认持仓，从交易台账同步）
 FALLBACK_POSITIONS = {
-    '513050': {'name': '中概互联ETF', 'cost': 1.1164, 'qty': 9500, 'stop': 1.06, 'take': 1.16, 'take2': 1.24, 'note': '7-31加仓4500份@1.129'},
-    '513120': {'name': '港股创新药ETF', 'cost': 1.174, 'qty': 4000, 'stop': 1.00, 'take': 1.25, 'take2': 1.35, 'note': '政策共振'},
+    '513050': {'name': '中概互联ETF', 'cost': 1.1164, 'qty': 6400, 'stop': 1.06, 'take': 1.16, 'take2': 1.24, 'note': '8-03减仓3100份(1.183×1500+1.180×1600)留6400份底仓'},
+    '513120': {'name': '港股创新药ETF', 'cost': 1.174, 'qty': 2000, 'stop': 1.00, 'take': 1.25, 'take2': 1.35, 'note': '8-03减仓2000份@1.133，留底仓2000份等接回1.10/1.05'},
     '159326': {'name': '电网设备ETF', 'cost': 1.600, 'qty': 2000, 'stop': 1.50, 'take': 1.65, 'take2': 1.80, 'note': '7-24第1批/共4批'},
     '159299': {'name': '金融科技ETF', 'cost': 0.711, 'qty': 3000, 'stop': 0.66, 'take': 0.74, 'take2': 0.82, 'note': '7-31试探仓进攻'},
 }
@@ -83,19 +83,24 @@ def is_trading_hours():
 def get_realtime(codes):
     """从腾讯接口获取实时行情"""
     results = {}
+    # 🔧 Bug 修复 2026-08-03：指数接口字段偏移 vs 股票接口
+    # - 股票（如513050）：parts[31] = 涨跌幅%
+    # - 指数（如000300）：parts[31] = 涨跌额, parts[32] = 涨跌幅%（前面20多个占位字段把数据后移）
+    # 修复：根据 code 前缀判断接口类型，选择正确的索引
+    INDEX_CODES = {'000001', '399001', '399006', '000688', '000300'}
     for code in codes:
         try:
             # 优先用 market 前缀
-            if code.startswith(('5', '6', '7')) or code in ('000001', '000688', '000300'):
+            if code.startswith(('5', '6', '7')) or code in INDEX_CODES:
                 market = 'sh'
             else:
                 market = 'sz'
-            
+
             # 候选ETF特殊处理
             for ckey, cinfo in CANDIDATE_ETF_BUILDS.items():
                 if code == ckey:
                     market = cinfo['market']
-            
+
             url = f'https://qt.gtimg.cn/q={market}{code}'
             req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
             raw = urllib.request.urlopen(req, timeout=8).read().decode('gbk', errors='replace')
@@ -103,14 +108,17 @@ def get_realtime(codes):
             if m:
                 parts = m.group(1).split('~')
                 price = float(parts[3]) if parts[3] else 0
-                change_pct = float(parts[31]) if parts[31] else 0.0
+                # 🔧 根据是否指数选择正确索引
+                pct_idx = 32 if code in INDEX_CODES else 31
+                change_pct = float(parts[pct_idx]) if len(parts) > pct_idx and parts[pct_idx] else 0.0
                 results[code] = {'price': price, 'change_pct': change_pct}
             else:
                 parts = raw.split('="')
                 if len(parts) > 1:
                     vals = parts[1].split('~')
                     price = float(vals[3]) if vals[3] else 0
-                    change_pct = float(vals[31]) if vals[31] else 0.0
+                    pct_idx = 32 if code in INDEX_CODES else 31
+                    change_pct = float(vals[pct_idx]) if len(vals) > pct_idx and vals[pct_idx] else 0.0
                     results[code] = {'price': price, 'change_pct': change_pct}
         except Exception as e:
             print(f'  {code} 获取失败: {e}')
