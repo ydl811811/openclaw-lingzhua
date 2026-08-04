@@ -23,8 +23,8 @@ SKIP_CODES = {'588080', '512480', '515980', '603876'}
 
 # 持仓表（默认持仓，从交易台账同步）
 FALLBACK_POSITIONS = {
-    '513050': {'name': '中概互联ETF', 'cost': 1.1164, 'qty': 6400, 'stop': 1.06, 'take': 1.16, 'take2': 1.24, 'note': '8-03减仓3100份(1.183×1500+1.180×1600)留6400份底仓'},
-    '513120': {'name': '港股创新药ETF', 'cost': 1.174, 'qty': 2000, 'stop': 1.00, 'take': 1.25, 'take2': 1.35, 'note': '8-03减仓2000份@1.133，留底仓2000份等接回1.10/1.05'},
+    '513050': {'name': '中概互联ETF', 'cost': 1.1164, 'qty': 3400, 'stop': 1.06, 'take': 1.16, 'take2': 1.24, 'note': '8-03减仓3100份(1.183×1500+1.180×1600) + 8-04减仓3000份@1.175 → 剩3400份底仓，TP2 1.24最后目标位'},
+    '513120': {'name': '港股创新药ETF', 'cost': 1.174, 'qty': 1000, 'stop': 1.00, 'take': 1.25, 'take2': 1.35, 'note': '8-03减仓2000份@1.133 + 8-04减仓1000份@1.169 → 仅剩1000份底仓，盘中观察'},
     '159326': {'name': '电网设备ETF', 'cost': 1.600, 'qty': 2000, 'stop': 1.50, 'take': 1.65, 'take2': 1.80, 'note': '7-24第1批/共4批'},
     '159299': {'name': '金融科技ETF', 'cost': 0.711, 'qty': 3000, 'stop': 0.66, 'take': 0.74, 'take2': 0.82, 'note': '7-31试探仓进攻'},
 }
@@ -72,6 +72,52 @@ CANDIDATE_ETF_BUILDS = {
 }
 
 # ⚠️ 516010游戏ETF已于7-24清仓，监控仅作为再入场候选
+
+# 🆕 8-04 562800 稀有金属ETF嘉实（纯观察）
+# 背景：13:20 老大指示加入观察股
+# 性质：长期下跌 -22% + 今天首次强反弹 +2.10%
+# 策略：纯观察不介入，等回踩 0.85（7/20 阶段底 + 二次探底颈线）
+# 老大拍板：2026-08-04 13:24
+OBSERVATION_WATCH = {
+    '562800': {
+        'name': '稀有金属ETF嘉实',
+        'market': 'sh',
+        'observe_only': True,  # 纯观察，不主动触发预警
+        'levels': [
+            {'price': 0.85, 'batch': 1, 'done': False, 'note': '观察触发-7/20阶段底'},
+            {'price': 0.83, 'batch': 2, 'done': False, 'note': '观察触发-二次探底颈线'},
+        ],
+        'note': '📌562800加入观察股（8-04 13:24 老大拍板，观望等深位）',
+    },
+}
+
+# 🆕 8-04 513120 港股创新药ETF接回计划（方案A改2批）
+
+# 🆕 8-04 513120 港股创新药ETF接回计划（方案A改2批）
+# 背景：8-03减仓2000份@1.133 + 8-04减仓1000份@1.169 → 仅剩1000份底仓@成本1.174
+# 目标：分2批接回4000份 → 满仓5000份（综合成本 ¥1.135）
+# 老大拍板：2026-08-04 11:05
+RECOVERY_PLANS = {
+    '513120': {
+        'name': '港股创新药ETF',
+        'market': 'sh',   # 8-04 灵爪踩坑后确认是 sh 前缀
+        'base_qty': 1000,  # 当前底仓份额
+        'target_qty': 5000,  # 满仓份额
+        'levels': [
+            {'price': 1.150, 'batch': 1, 'qty': 2000, 'done': False, 'note': '第1档-跌破早盘低1.156后回踩1.150确认'},
+            {'price': 1.100, 'batch': 2, 'qty': 2000, 'done': False, 'note': '第2档-跌到老大8-03原计划接回位'},
+        ],
+        'stop': 1.000,    # 铁止损（跌破全部清仓）
+        'cease_buy': 1.100,  # 跌破此位 → 第2档不接，评估底仓
+        'target1': 1.250,  # TP1 老大原计划
+        'target2': 1.350,  # TP2 老大原计划
+        'profit_taking': [   # 突破加仓（让利润奔跑）
+            {'price': 1.184, 'qty': 1000, 'note': '早盘高-突破追加进攻'},
+            {'price': 1.220, 'qty': 1000, 'note': 'W底目标位-再追加'},
+        ],
+        'note': '📌513120接回计划（8-04 11:05 老大拍板：方案A改2批）',
+    },
+}
 
 def is_trading_hours():
     now = datetime.now()
@@ -163,6 +209,8 @@ def check(positions):
     all_codes = list(positions.keys())
     all_codes.extend(list(INDICES.keys()))
     all_codes.extend(list(CANDIDATE_ETF_BUILDS.keys()))
+    all_codes.extend(list(RECOVERY_PLANS.keys()))
+    all_codes.extend(list(OBSERVATION_WATCH.keys()))
     
     results = get_realtime(all_codes)
     
@@ -221,6 +269,75 @@ def check(positions):
                 alerts.append(alert_msg)
                 level['done'] = True
                 log_msg(f"触发建仓: {alert_msg}")
+
+    # ========== 2.5 🆕 8-04 513120 接回计划检查 ==========
+    for code, plan in RECOVERY_PLANS.items():
+        if code not in results:
+            continue
+        price = results[code]['price']
+        change_pct = results[code]['change_pct']
+
+        # 跌破铁止损 → 全部清仓预警
+        stop = plan.get('stop')
+        if stop and price <= stop:
+            alerts.append(f"🚨【{plan['name']}】破铁止损！现价{price} ≤ {stop:.3f}，底仓{plan['base_qty']}份全部清仓")
+
+        # 接回档位检测
+        for level in plan['levels']:
+            if level['done']:
+                continue
+            if price <= level['price']:
+                alert_msg = (
+                    f"📥【{plan['name']}】触发接回第{level['batch']}档！\n"
+                    f"   现价：{price} ≤ 接回价{level['price']:.3f}\n"
+                    f"   数量：{level['qty']}份（约¥{level['qty']*price:.0f}）\n"
+                    f"   理由：{level['note']}\n"
+                    f"   跳仓后总持仓：{plan['base_qty']} + 已跳档 = {plan['target_qty']}份目标\n"
+                    f"   当日涨幅：{change_pct:+.2f}%"
+                )
+                alerts.append(alert_msg)
+                level['done'] = True
+                log_msg(f"触发接回: {alert_msg}")
+
+        # 跌破接回截止位 → 提示不进
+        cease_buy = plan.get('cease_buy')
+        if cease_buy and price < cease_buy:
+            alerts.append(f"⚠️【{plan['name']}】现价{price} < 接回截止{cease_buy:.3f}，第2档不接，评估是否清仓底仓")
+
+        # 突破加仓位（让利润奔跑）
+        for pt in plan.get('profit_taking', []):
+            if price >= pt['price']:
+                alerts.append(
+                    f"🚀【{plan['name']}】突破{pt['price']:.3f}！考虑追加{pt['qty']}份进攻\n"
+                    f"   理由：{pt['note']}"
+                )
+
+    # ========== 2.6 🆕 8-04 562800 观察股触发检查 ==========
+    for code, plan in OBSERVATION_WATCH.items():
+        if code not in results:
+            continue
+        price = results[code]['price']
+        change_pct = results[code]['change_pct']
+
+        # 仅监控下跌触发（上涨不预警）
+        for level in plan['levels']:
+            if level['done']:
+                continue
+            if price <= level['price']:
+                alert_msg = (
+                    f"👀【{plan['name']}】跌到观察点！\n"
+                    f"   现价：{price} ≤ 观察位{level['price']:.3f}\n"
+                    f"   理由：{level['note']}\n"
+                    f"   当日涨幅：{change_pct:+.2f}%\n"
+                    f"   ⚠️仅提醒，老大决定是否建仓"
+                )
+                alerts.append(alert_msg)
+                level['done'] = True
+                log_msg(f"观察触发: {alert_msg}")
+
+        # 上涨越过现价 +5% 以上 → 推送"加速上涨"提醒（不主动买）
+        if change_pct >= 5.0:
+            alerts.append(f"🚀【{plan['name']}】当日强势 +{change_pct:.2f}%！评估是否介入（老大决定）")
     
     # ========== 3. 🆕 大盘联动预警 ==========
     hs300 = results.get('000300')
@@ -269,25 +386,64 @@ def main():
     positions = FALLBACK_POSITIONS
     position_refresh_interval = 300
     
-    # 加载已触发的建仓档位（避免重启后重复触发）
+    # 加载已触发的建仓档位 + 接回档位（避免重启后重复触发）
+    # 🆕 8-04 兼容老平铺格式 {"159299": [bool...]} / 新嵌套格式 {"candidates":{}, "recovery":{}}
     state_file = "/tmp/etf_build_state.json"
     if os.path.exists(state_file):
         try:
             with open(state_file, 'r') as f:
                 saved_state = json.load(f)
-            for code, plan in CANDIDATE_ETF_BUILDS.items():
-                if code in saved_state:
+
+            # 判断格式：顶层是 code → [bool]（老）还是 candidates/recovery（嵌套新）
+            is_old_format = any(k in saved_state for k in CANDIDATE_ETF_BUILDS.keys())
+
+            if is_old_format:
+                # 老格式直接读 candidate
+                for code, plan in CANDIDATE_ETF_BUILDS.items():
+                    if code in saved_state:
+                        for i, lvl in enumerate(plan['levels']):
+                            if i < len(saved_state[code]):
+                                plan['levels'][i]['done'] = saved_state[code][i]
+            else:
+                # 新格式读 candidates 嵌套
+                cand = saved_state.get('candidates', {})
+                for code, plan in CANDIDATE_ETF_BUILDS.items():
+                    if code in cand:
+                        for i, lvl in enumerate(plan['levels']):
+                            if i < len(cand[code]):
+                                plan['levels'][i]['done'] = cand[code][i]
+
+            # 接回档位（只在新格式里有）
+            for code, plan in RECOVERY_PLANS.items():
+                if code in saved_state.get('recovery', {}):
                     for i, lvl in enumerate(plan['levels']):
-                        if i < len(saved_state[code]):
-                            plan['levels'][i]['done'] = saved_state[code][i]
-            print(f"已恢复建仓状态")
+                        if i < len(saved_state['recovery'][code]):
+                            plan['levels'][i]['done'] = saved_state['recovery'][code][i]
+
+            # 🆕 8-04 观察股档位恢复（只在新格式里有）
+            for code, plan in OBSERVATION_WATCH.items():
+                if code in saved_state.get('observation', {}):
+                    for i, lvl in enumerate(plan['levels']):
+                        if i < len(saved_state['observation'][code]):
+                            plan['levels'][i]['done'] = saved_state['observation'][code][i]
+            print(f"已恢复建仓 + 接回 + 观察状态")
         except:
             pass
     
     def save_state():
-        state = {}
+        state = {
+            'candidates': {},
+            'recovery': {},
+            'observation': {}
+        }
         for code, plan in CANDIDATE_ETF_BUILDS.items():
-            state[code] = [lvl['done'] for lvl in plan['levels']]
+            state['candidates'][code] = [lvl['done'] for lvl in plan['levels']]
+        # 🆕 8-04 接回状态保存
+        for code, plan in RECOVERY_PLANS.items():
+            state['recovery'][code] = [lvl['done'] for lvl in plan['levels']]
+        # 🆕 8-04 观察股状态保存
+        for code, plan in OBSERVATION_WATCH.items():
+            state['observation'][code] = [lvl['done'] for lvl in plan['levels']]
         try:
             with open(state_file, 'w') as f:
                 json.dump(state, f)
@@ -315,7 +471,7 @@ def main():
             save_state()
             
             # 大盘指数显示
-            all_codes = list(INDICES.keys()) + list(CANDIDATE_ETF_BUILDS.keys())
+            all_codes = list(INDICES.keys()) + list(CANDIDATE_ETF_BUILDS.keys()) + list(RECOVERY_PLANS.keys()) + list(OBSERVATION_WATCH.keys())
             results = get_realtime(all_codes)
             index_lines = [f"📊 {timestamp} 大盘+ETF联动监控"]
             
@@ -334,6 +490,25 @@ def main():
                     pct = d['change_pct']
                     arrow = "🟢" if pct > 0 else ("🔴" if pct < 0 else "⚪")
                     index_lines.append(f"  {arrow} {plan['name']}({code}): {d['price']} ({pct:+.2f}%)")
+            
+            # 🆕 8-04 接回计划显示
+            for code, plan in RECOVERY_PLANS.items():
+                if code in results:
+                    d = results[code]
+                    pct = d['change_pct']
+                    arrow = "🟢" if pct > 0 else ("🔴" if pct < 0 else "⚪")
+                    # 标记哪些档已触发
+                    done_str = '/'.join([f"L{l['batch']}✓" if l['done'] else f"L{l['batch']}" for l in plan['levels']])
+                    index_lines.append(f"  🔁 {plan['name']}({code}): {d['price']} ({pct:+.2f}%) 接回进度[{done_str}]")
+            
+            # 🆕 8-04 观察股显示
+            for code, plan in OBSERVATION_WATCH.items():
+                if code in results:
+                    d = results[code]
+                    pct = d['change_pct']
+                    arrow = "🟢" if pct > 0 else ("🔴" if pct < 0 else "⚪")
+                    done_str = '/'.join([f"L{l['batch']}✓" if l['done'] else f"L{l['batch']}" for l in plan['levels']])
+                    index_lines.append(f"  👀 {plan['name']}({code}): {d['price']} ({pct:+.2f}%) 观察点[{done_str}]")
             
             print('\n'.join(index_lines))
             
