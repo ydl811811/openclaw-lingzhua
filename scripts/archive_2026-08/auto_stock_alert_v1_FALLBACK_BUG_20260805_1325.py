@@ -18,16 +18,12 @@ PID_FILE = "/tmp/stock_monitor.pid"
 TRADING_LEDGER = "/home/YDL/.openclaw/workspace/a_stock_plan/交易记录台账.md"
 LOG_FILE = "/home/YDL/.openclaw/workspace/logs/stock_monitor.log"
 
-# 飞书 Webhook 配置（2026-08-05 13:39 从 a_stock_plan/scripts/auto_stock_alert.py 恢复）
-FEISHU_BOT_URL = "https://open.feishu.cn/open-apis/bot/v2/hook/fbfd7f01-878c-4ece-80e6-5e7324ab3692"
-FEISHU_SECRET = "9vXyEvLigZ70Ynw1YeUtI"
-
 # 需要跳过的品种（已清仓/不再监控）
 SKIP_CODES = {'588080', '512480', '515980', '603876'}
 
 # 持仓表（默认持仓，从交易台账同步）
 FALLBACK_POSITIONS = {
-    '513050': {'name': '中概互联ETF', 'cost': 1.1164, 'qty': 3400, 'stop': 1.10, 'take': 1.20, 'take2': 1.24, 'note': '8-03减仓6100份 + 8-04减仓3000份 → 剩3400份底仓；8-05 13:53 老大拍板上调TP1 1.16→1.20，TP2 1.24不变/极限 1.28'},
+    '513050': {'name': '中概互联ETF', 'cost': 1.1164, 'qty': 3400, 'stop': 1.06, 'take': 1.16, 'take2': 1.24, 'note': '8-03减仓3100份(1.183×1500+1.180×1600) + 8-04减仓3000份@1.175 → 剩3400份底仓，TP2 1.24最后目标位'},
     '513120': {'name': '港股创新药ETF', 'cost': 1.174, 'qty': 1000, 'stop': 1.00, 'take': 1.25, 'take2': 1.35, 'note': '8-03减仓2000份@1.133 + 8-04减仓1000份@1.169 → 仅剩1000份底仓，盘中观察'},
     '159326': {'name': '电网设备ETF', 'cost': 1.600, 'qty': 2000, 'stop': 1.50, 'take': 1.65, 'take2': 1.80, 'note': '7-24第1批/共4批'},
     '159299': {'name': '金融科技ETF', 'cost': 0.711, 'qty': 3000, 'stop': 0.66, 'take': 0.74, 'take2': 0.82, 'note': '7-31试探仓进攻'},
@@ -116,10 +112,10 @@ RECOVERY_PLANS = {
         'target1': 1.250,  # TP1 老大原计划
         'target2': 1.350,  # TP2 老大原计划
         'profit_taking': [   # 突破加仓（让利润奔跑）
-            {'price': 1.180, 'qty': 2000, 'note': '8-05 14:14 老大拍板-2000份接回进攻（价格更低、数量翻倍）'},
+            {'price': 1.184, 'qty': 1000, 'note': '早盘高-突破追加进攻'},
             {'price': 1.220, 'qty': 1000, 'note': 'W底目标位-再追加'},
         ],
-        'note': '📌513120接回计划（8-04 11:05 老大拍板：方案A改2批，8-05 14:14 调整profit_taking[0]为 1.180×2000份）',
+        'note': '📌513120接回计划（8-04 11:05 老大拍板：方案A改2批）',
     },
 }
 
@@ -184,31 +180,14 @@ def log_msg(msg):
         pass
 
 def send_feishu(msg):
-    """飞书 Webhook 发送（主推送通道，2026-08-05 13:39 恢复 + 加签名验证）
-    从 a_stock_plan/scripts/auto_stock_alert.py 完整恢复
-    """
-    import hmac
-    import hashlib
-    import base64
-
-    timestamp = str(int(time.time()))
-    string_to_sign = timestamp + '\n' + FEISHU_SECRET
-    sign = base64.b64encode(hmac.new(string_to_sign.encode(), digestmod=hashlib.sha256).digest()).decode()
-
-    payload = {"msg_type": "text", "content": {"text": msg}}
-    payload['timestamp'] = timestamp
-    payload['sign'] = sign
-
-    data = json.dumps(payload).encode('utf-8')
-    req = urllib.request.Request(FEISHU_BOT_URL, data=data, headers={'Content-Type': 'application/json'})
+    """飞书Webhook发送（备用）"""
     try:
-        resp = urllib.request.urlopen(req, timeout=5)
-        result = resp.read().decode('utf-8')
-        print(f"  ✅ 飞书推送: {result[:100]}")
-        return True
-    except Exception as e:
-        print(f"  ❌ 飞书推送失败: {e}")
-        return False
+        url = "https://open.feishu.cn/open-apis/bot/v2/hook/your_webhook_url"
+        data = json.dumps({"msg_type": "text", "content": {"text": msg}}).encode('utf-8')
+        req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
+        urllib.request.urlopen(req, timeout=5)
+    except:
+        pass
 
 SHAREBOX_PATH = "/home/YDL/.openclaw/workspace/claw-communication/sharebox/longzhua-box"
 
@@ -221,64 +200,6 @@ def write_sharebox_alert(msg):
             f.write(msg)
     except:
         pass
-
-def parse_positions_from_ledger(ledger_path):
-    """从交易台账解析当前持仓 (2026-08-05 13:25 v2 修复索引错位+限定持仓段)
-    逻辑：只在「当前持仓」段落内匹配加粗持仓行，跳过历史持仓表/候选股池
-    返回: { code: {name, cost, qty, stop, take, take2} } 或 None
-    """
-    try:
-        with open(ledger_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-    except Exception as e:
-        print(f"  ❌ 读取台账失败: {e}")
-        return None
-
-    # 1) 限定范围：只取「当前持仓」段（以 "## 当前持仓" 到下一个 "## " 之间）
-    start = content.find("## 当前持仓")
-    if start == -1:
-        print("  ❌ 找不到「当前持仓」段落")
-        return None
-    # 找下一个 ## 标题作为结束
-    end = content.find("\n## ", start + 10)
-    if end == -1:
-        end = len(content)
-    section = content[start:end]
-
-    positions = {}
-    # 2) 匹配持仓行（带 **¥** 加粗价格的）
-    #    格式: | **名称** | **代码** | **数量** | **¥成本** | 现价 | ... | **¥止损** | **¥目标1** | **¥目标2** | 状态 |
-    pattern = r'\|\s*\*\*(.+?)\*\*\s*\|\s*\*\*(.+?)\*\*\s*\|\s*\*\*([\d,]+)\*\*\s*\|\s*\*\*¥([\d.]+)\*\*\s*\|'
-    for m in re.finditer(pattern, section):
-        name, code, qty_str, cost_str = m.groups()
-        # 只取数字代码（6 位）
-        if not code.isdigit() or len(code) != 6:
-            continue
-        qty = int(qty_str.replace(',', ''))
-        if qty == 0:  # 跳过已清仓
-            continue
-        cost = float(cost_str)
-        # 3) 提取同行后续的加粗 ¥价格
-        line_start = m.start()
-        line_end = section.find('\n', line_start)
-        if line_end == -1:
-            line_end = len(section)
-        line = section[line_start:line_end]
-        prices = re.findall(r'\*\*¥([\d.]+)\*\*', line)
-        # 实际字段: [成本, 止损, 止盈1, 止盈2]
-        stop  = float(prices[1]) if len(prices) >= 2 else 0
-        take  = float(prices[2]) if len(prices) >= 3 else 0
-        take2 = float(prices[3]) if len(prices) >= 4 else 0
-        positions[code] = {
-            'name': name,
-            'cost': cost,
-            'qty': qty,
-            'stop': stop,
-            'take': take,
-            'take2': take2,
-            'note': '',
-        }
-    return positions if positions else None
 
 def check(positions):
     """检查持仓+ETF建仓+大盘联动"""
@@ -536,15 +457,7 @@ def main():
             # 每5分钟重新读取持仓
             if current_time - last_position_read > position_refresh_interval:
                 print(f"\n🔄 [{datetime.now().strftime('%H:%M:%S')}] 重新读取交易台账...")
-                # 🆕 2026-08-05 修复：真正从台账读取持仓，而不是用写死的 FALLBACK
-                fresh_positions = parse_positions_from_ledger(TRADING_LEDGER)
-                if fresh_positions:
-                    positions = fresh_positions
-                    print(f"  📥 读取持仓: {len(positions)} 只")
-                    for code, pos in positions.items():
-                        print(f"     {pos['name']}({code}) x{pos['qty']} @¥{pos['cost']}")
-                else:
-                    print("  ⚠️ 台账读取失败，沿用上次持仓")
+                positions = FALLBACK_POSITIONS
                 last_position_read = current_time
             
             if not is_trading_hours():
@@ -606,10 +519,6 @@ def main():
                     msg = '\n'.join(msg_lines)
                     print(msg)
                     log_msg(f"预警:\n{msg}")
-                    # 🆕 2026-08-05 13:40 推送修复：真正调 send_feishu 发给老大
-                    send_feishu(msg)
-                    # 同时写 sharebox 备份通道
-                    write_sharebox_alert(msg)
                     last_alert_time = current_time
                 else:
                     remaining = alert_cooldown - (current_time - last_alert_time)
