@@ -1,0 +1,19 @@
+{
+  "take_done": {
+    "159299": {
+      "triggered_date": "2026-08-06",
+      "triggered_price": 0.74,
+      "note": "老大 10:12 已挂 0.745×2500份条件单锁利 TP1，本脚本不再触发"
+    }
+  },
+  "profit_taking_done": {
+    "513120:1.180": {
+      "triggered_date": "2026-08-06",
+      "filled_price": 1.179,
+      "filled_shares": 2000,
+      "note": "8-06 09:37:58 老大手动市价买入成交；不再触发"
+    }
+  },
+  "recovery_done": {},
+  "updated_at": "2026-08-06 15:00:42"
+}

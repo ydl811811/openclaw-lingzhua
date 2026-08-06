@@ -28,7 +28,7 @@ SKIP_CODES = {'588080', '512480', '515980', '603876'}
 # 持仓表（默认持仓，从交易台账同步）
 FALLBACK_POSITIONS = {
     '513050': {'name': '中概互联ETF', 'cost': 1.1164, 'qty': 3400, 'stop': 1.10, 'take': 1.20, 'take2': 1.24, 'note': '8-03减仓6100份 + 8-04减仓3000份 → 剩3400份底仓；8-05 13:53 老大拍板上调TP1 1.16→1.20，TP2 1.24不变/极限 1.28'},
-    '513120': {'name': '港股创新药ETF', 'cost': 1.174, 'qty': 1000, 'stop': 1.00, 'take': 1.25, 'take2': 1.35, 'note': '8-03减仓2000份@1.133 + 8-04减仓1000份@1.169 → 仅剩1000份底仓，盘中观察'},
+    '513120': {'name': '港股创新药ETF', 'cost': 1.1773, 'qty': 3000, 'stop': 1.00, 'take': 1.22, 'take2': 1.24, 'note': '8-06 09:37 加仓2000份@1.179 成交（底仓1000+新加2000）→ 总仓3000份@均价1.1773；8-05 14:09 挂1.18/2000份条件单expired，今早手动重挂成交'},
     '159326': {'name': '电网设备ETF', 'cost': 1.600, 'qty': 2000, 'stop': 1.50, 'take': 1.65, 'take2': 1.80, 'note': '7-24第1批/共4批'},
     '159299': {'name': '金融科技ETF', 'cost': 0.711, 'qty': 3000, 'stop': 0.66, 'take': 0.74, 'take2': 0.82, 'note': '7-31试探仓进攻'},
 }
@@ -105,8 +105,8 @@ RECOVERY_PLANS = {
     '513120': {
         'name': '港股创新药ETF',
         'market': 'sh',   # 8-04 灵爪踩坑后确认是 sh 前缀
-        'base_qty': 1000,  # 当前底仓份额
-        'target_qty': 5000,  # 满仓份额
+        'base_qty': 3000,  # 8-06 09:37 加仓 2000 份@1.179 后修正
+        'target_qty': 5000,  # 满仓份额（不变）
         'levels': [
             {'price': 1.150, 'batch': 1, 'qty': 2000, 'done': False, 'note': '第1档-跌破早盘低1.156后回踩1.150确认'},
             {'price': 1.100, 'batch': 2, 'qty': 2000, 'done': False, 'note': '第2档-跌到老大8-03原计划接回位'},
@@ -116,12 +116,39 @@ RECOVERY_PLANS = {
         'target1': 1.250,  # TP1 老大原计划
         'target2': 1.350,  # TP2 老大原计划
         'profit_taking': [   # 突破加仓（让利润奔跑）
-            {'price': 1.180, 'qty': 2000, 'note': '8-05 14:14 老大拍板-2000份接回进攻（价格更低、数量翻倍）'},
+            {'price': 1.180, 'qty': 2000, 'done': True, 'filled_at': '2026-08-06 09:37:58', 'filled_price': 1.179, 'note': '✅ 8-06 09:37:58 已成交2000份@1.179（8-05 14:09 挂单expired后今早手动市价买入）；不再触发预警'},
             {'price': 1.220, 'qty': 1000, 'note': 'W底目标位-再追加'},
         ],
-        'note': '📌513120接回计划（8-04 11:05 老大拍板：方案A改2批，8-05 14:14 调整profit_taking[0]为 1.180×2000份）',
+        'note': '📌513120接回计划（8-04 11:05 老大拍板：方案A改2批；8-06 09:37 profit_taking[0] 1.180×2000份 已成交，base_qty 修正为 3000）',
     },
 }
+
+
+
+# 🆕 8-06 10:18 持久化预警状态（防老预警重发）
+def _state_path():
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'position_state.json')
+
+def load_position_state():
+    p = _state_path()
+    if not os.path.exists(p):
+        return {'take_done': {}, 'profit_taking_done': {}, 'recovery_done': {}}
+    try:
+        with open(p, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        log_msg(f"⚠️ 读 position_state.json 失败: {e}，用空状态")
+        return {'take_done': {}, 'profit_taking_done': {}, 'recovery_done': {}}
+
+def save_position_state(state):
+    p = _state_path()
+    state['updated_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    try:
+        with open(p, 'w', encoding='utf-8') as f:
+            json.dump(state, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        log_msg(f"⚠️ 写 position_state.json 失败: {e}")
+
 
 def is_trading_hours():
     now = datetime.now()
@@ -282,6 +309,7 @@ def parse_positions_from_ledger(ledger_path):
 
 def check(positions):
     """检查持仓+ETF建仓+大盘联动"""
+    state = load_position_state()  # 🆕 8-06 持久化预警状态
     alerts = []
     
     # 收集所有要监控的代码
@@ -314,7 +342,16 @@ def check(positions):
         if stop and price <= stop:
             alerts.append(f"🚨止损！{pos['name']} 现价{price} ≤ 止损{stop:.2f}")
         elif take and price >= take:
-            alerts.append(f"🎯止盈！{pos['name']} 现价{price} ≥ 目标{take:.2f}")
+            take_key = code
+            if state['take_done'].get(take_key):
+                pass  # 今天已发过，不重复
+            else:
+                alerts.append(f"🎯止盈！{pos['name']} 现价{price} ≥ 目标{take:.2f}")
+                state['take_done'][take_key] = {
+                    'triggered_date': datetime.now().strftime('%Y-%m-%d'),
+                    'triggered_price': price,
+                    'note': f'已挂单/已处理，不再重复预警'
+                }
         
         if cost > 0 and qty > 0:
             profit_pct = (price - cost) / cost * 100
@@ -385,11 +422,20 @@ def check(positions):
 
         # 突破加仓位（让利润奔跑）
         for pt in plan.get('profit_taking', []):
+            if pt.get('done'):
+                continue  # 已成交的跳过
+            pt_key = f"{code}:{pt['price']}"
+            if state['profit_taking_done'].get(pt_key):
+                continue  # 持久化已记录
             if price >= pt['price']:
                 alerts.append(
                     f"🚀【{plan['name']}】突破{pt['price']:.3f}！考虑追加{pt['qty']}份进攻\n"
                     f"   理由：{pt['note']}"
                 )
+                state['profit_taking_done'][pt_key] = {
+                    'triggered_date': datetime.now().strftime('%Y-%m-%d'),
+                    'note': pt.get('note', '')
+                }
 
     # ========== 2.6 🆕 8-04 562800 观察股触发检查 ==========
     for code, plan in OBSERVATION_WATCH.items():
@@ -437,6 +483,7 @@ def check(positions):
         if hs300['change_pct'] < 0 and ft_pct > 0.5:
             alerts.append(f"🔥【主力吸筹信号】大盘跌{hs300['change_pct']:.2f}%，金融科技ETF逆势涨{ft_pct:.2f}%，主力护盘明显")
     
+    save_position_state(state)
     return alerts
 
 def main():
