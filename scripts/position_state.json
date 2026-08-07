@@ -4,6 +4,11 @@
       "triggered_date": "2026-08-06",
       "triggered_price": 0.74,
       "note": "老大 10:12 已挂 0.745×2500份条件单锁利 TP1，本脚本不再触发"
+    },
+    "513120": {
+      "triggered_date": "2026-08-07",
+      "triggered_price": 1.221,
+      "note": "已挂单/已处理，不再重复预警"
     }
   },
   "profit_taking_done": {
@@ -12,8 +17,12 @@
       "filled_price": 1.179,
       "filled_shares": 2000,
       "note": "8-06 09:37:58 老大手动市价买入成交；不再触发"
+    },
+    "513120:1.22": {
+      "triggered_date": "2026-08-07",
+      "note": "W底目标位-再追加"
     }
   },
   "recovery_done": {},
-  "updated_at": "2026-08-06 15:00:42"
+  "updated_at": "2026-08-07 15:00:37"
 }
