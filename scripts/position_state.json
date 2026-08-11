@@ -21,8 +21,18 @@
     "513120:1.22": {
       "triggered_date": "2026-08-07",
       "note": "W底目标位-再追加"
+    },
+    "513120:tp2_breach": {
+      "triggered_date": "2026-08-11",
+      "current_price": 1.283,
+      "tp2_target": 1.24,
+      "breach_pct": "+3.5%",
+      "default_action": "A_plan",
+      "action": "移动止盈 1.24（跌破自动清仓 4000份）",
+      "status": "pending_boss_confirm",
+      "note": "15:07 heartbeat 第3次无答，按 HEARTBEAT.md SOP 默认 A 方案落库；等老大开盘前确认执行"
     }
   },
   "recovery_done": {},
-  "updated_at": "2026-08-07 15:00:37"
+  "updated_at": "2026-08-11 15:07:35"
 }
