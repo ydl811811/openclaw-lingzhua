@@ -44,7 +44,13 @@ import pandas as pd
 
 # ============== 配置 ==============
 BASE_URL = "https://ai-tool.indevs.in/tushare/pro"
-API_KEY = os.environ.get("TUSHARE_RELAY_KEY", "huanghanchi")  # 咸鱼买的（老大 2026-07-24 给）
+# Key 池（老大 2026-08-17 给的两个新 key，旧的 huanghanchi 已失效）
+# 优先使用环境变量 TUSHARE_RELAY_KEY，否则从下面按顺序轮询
+API_KEY_POOL = [
+    "b64c6ee7023944c8e6502ce1e95b6c356d70027c14e74a7778720ce0",  # Key 2（直连可用）
+    "e58c1ffea3ad1fc14801b4516c3c5a7314fba16160c990e0ab0151df",  # Key 1（走代理可用）
+]
+DEFAULT_API_KEY = os.environ.get("TUSHARE_RELAY_KEY") or API_KEY_POOL[0]
 CACHE_DIR = Path("/home/YDL/.openclaw/workspace/cache_temp/tushare_replay")
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 LOG_FILE = Path("/home/YDL/.openclaw/workspace/logs/tushare_client.log")
@@ -115,12 +121,13 @@ def cache(ttl_seconds: int = 3600):
 class TushareClient:
     """Tushare Pro Replay 统一客户端"""
 
-    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None, timeout: int = 15):
-        self.api_key = api_key or API_KEY
+    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None, timeout: int = 20):
+        self.api_key = api_key or DEFAULT_API_KEY
         self.base_url = base_url or BASE_URL
         self.timeout = timeout
         self.session = requests.Session()
         self.session.headers.update({"X-API-Key": self.api_key})
+        log.info(f"TushareClient 初始化 key={self.api_key[:10]}...{self.api_key[-4:]}")
 
     # ---------- 底层调用 ----------
     def _rate_limit(self):
@@ -133,7 +140,7 @@ class TushareClient:
 
     def _request(self, api_name: str, params: Optional[Dict] = None, fields: Optional[str] = None,
                  max_retries: int = 3) -> Dict:
-        """底层 HTTP 调用（带重试 + 限频）"""
+        """底层 HTTP 调用（带重试 + 限频 + IP 限额识别）"""
         self._rate_limit()
 
         # 序列化参数（list → 逗号分隔）
@@ -163,6 +170,22 @@ class TushareClient:
                     raise Exception(f"HTTP {resp.status_code}: {resp.text[:200]}")
 
                 data = resp.json()
+
+                # ok 字段显式 false（咸鱼接口风格）
+                if data.get("ok") is False:
+                    err = data.get("error", "")
+                    msg = data.get("message", "")
+                    lease = data.get("lease_seconds", 0)
+                    # IP 限额 → 等 lease 秒再重试
+                    if "active_ip_limit" in err:
+                        log.warning(f"{api_name} IP 限额，等 {lease}s 后重试 (attempt {attempt}/{max_retries})")
+                        time.sleep(lease + 1)
+                        continue
+                    # invalid_api_key → 立即终止（key 失效，无重试意义）
+                    if "invalid_api_key" in err:
+                        log.error(f"{api_name} API Key 无效: {msg}")
+                        return {"api": api_name, "code": -1, "msg": msg, "items": []}
+                    raise Exception(f"业务错误 err={err} msg={msg}")
 
                 # code 非 0 视为业务错误
                 code = data.get("code", 0)
