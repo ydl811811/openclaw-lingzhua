@@ -51,7 +51,7 @@ Capture what matters. Decisions, context, things to remember. Skip the secrets u
 - **Memory is limited** — if you want to remember something, WRITE IT TO A FILE
 - "Mental notes" don't survive session restarts. Files do.
 - When someone says "remember this" → update `memory/YYYY-MM-DD.md` or relevant file
-- When you learn a lesson → update AGENTS.md, TOOLS.md, or the relevant skill
+- When you learn a lesson → update AGENTS.md or the relevant skill
 - When you make a mistake → document it so future-you doesn't repeat it
 - **Text > Brain** 📝
 
@@ -125,7 +125,9 @@ Reactions are lightweight social signals. Humans use them constantly — they sa
 
 ## Tools
 
-Skills provide your tools. When you need one, check its `SKILL.md`. Keep local notes (camera names, SSH details, voice preferences) in `TOOLS.md`.
+### Local notes
+
+Skills define how tools work. Keep environment-specific local notes in this section.
 
 **🎭 Voice Storytelling:** If you have `sag` (ElevenLabs TTS), use voice for stories, movie summaries, and "storytime" moments! Way more engaging than walls of text. Surprise people with funny voices.
 
@@ -134,6 +136,187 @@ Skills provide your tools. When you need one, check its `SKILL.md`. Keep local n
 - **Discord/WhatsApp:** No markdown tables! Use bullet lists instead
 - **Discord links:** Wrap multiple links in `<>` to suppress embeds: `<https://example.com>`
 - **WhatsApp:** No headers — use **bold** or CAPS for emphasis
+
+### Local notes (migrated from TOOLS.md)
+
+# TOOLS.md - Local Notes
+
+Skills define _how_ tools work. This file is for _your_ specifics — the stuff that's unique to your setup.
+
+## What Goes Here
+
+Things like:
+
+- Camera names and locations
+- SSH hosts and aliases
+- Preferred voices for TTS
+- Speaker/room names
+- Device nicknames
+- Anything environment-specific
+
+## Examples
+
+```markdown
+### Cameras
+
+- living-room → Main area, 180° wide angle
+- front-door → Entrance, motion-triggered
+
+### SSH
+
+- home-server → 192.168.1.100, user: admin
+
+### TTS
+
+- Preferred voice: "Nova" (warm, slightly British)
+- Default speaker: Kitchen HomePod
+```
+
+## Why Separate?
+
+Skills are shared. Your setup is yours. Keeping them apart means you can update skills without losing your notes, and share skills without leaking your infrastructure.
+
+---
+
+Add whatever helps you do your job. This is your cheat sheet.
+
+---
+
+### 🏠 家庭网络设备
+
+#### 主路由（ImmortalWrt 软路由）
+- **IP**：192.168.31.1
+- **SSH**：root / 123456
+- **固件**：ImmortalWrt 24.10.4，J4125，12GB 内存，9.7GB SSD
+- **连接命令**：`sshpass -p '123456' ssh -o StrictHostKeyChecking=no root@192.168.31.1`
+- **备注**：双线 IPv6，Mesh 组网（小米 RD08 主 + RM1800 节点）
+
+---
+
+### 家庭成员（OpenClaw Agents）
+
+- **老大（大哥）**：ou_b90276e71e9f613fda962a035a87bf87（飞书群主）
+- **龙爪（二哥）**：ou_b7bcd1da66776828ae12339ec3f52166（统筹者，IP 192.168.31.107）
+- **灵爪（小妹）**：ou_677e74d2df6df4353962e6502b206a7e（我，股票分析师）
+
+💡 重要：作战室路径 `~/.openclaw/workspace/war-room/`（与 `claw-communication` 符号链接）
+
+## 🐉 龙爪的 stock_quote 数据接口（2026-07-19 启用，替代 adata）
+
+**用途**：通过SSH调用龙爪的 stock_quote.py（direct API 封装）获取A股数据，**不再使用 adata**（7-19 已弃用，库代码归档到 `.archive/adata-stock-data/` 但还能 import，**不要调它**）。
+
+**数据源**（stock_quote.py 内部封装）：
+- 腾讯 qt.gtimg.cn：实时行情 + 5 档（盘中首选）
+- 新浪 hq.sinajs.cn：实时行情（集合竞价 prev_close 准）
+- 东方财富 push2.eastmoney.com：批量报价（最快）
+- 新浪 K 线 API：历史 K 线
+
+### 连接信息
+- 龙爪IP: 192.168.31.141
+- SSH用户: yu
+- SSH密钥: `/home/YDL/.ssh/id_ed25519`
+- 脚本路径: `/home/yu/.hermes/scripts/stock_quote.py`
+- Python: `/usr/bin/python3.12`
+
+### 调用格式
+```bash
+ssh -i /home/YDL/.ssh/id_ed25519 -o StrictHostKeyChecking=no \
+  yu@192.168.31.141 \
+  '/usr/bin/python3.12 /home/yu/.hermes/scripts/stock_quote.py <命令> [参数]'
+```
+
+### 常用命令
+| 命令 | 功能 | 数据源 |
+|------|------|-------|
+| `realtime sh600519 sz000001` | 实时行情（多股，带5档） | 腾讯 qt.gtimg.cn |
+| `kline sz000536 60` | 日K线（个股） | 新浪 K 线 |
+| `batch 1.600519,0.000001` | 批量报价（多股，快） | 东方财富 push2.eastmoney.com |
+| `sina sh600519 sz000001` | 实时行情（集合竞价 prev_close 准） | 新浪 hq.sinajs.cn |
+
+### Python 用法（直接在龙爪机器上 import）
+```python
+from stock_quote import tencent_realtime, sina_realtime, eastmoney_batch
+data = tencent_realtime(['sh600519', 'sz000001'])
+```
+
+### 验证命令
+```bash
+ssh -i /home/YDL/.ssh/id_ed25519 -o StrictHostKeyChecking=no \
+  yu@192.168.31.141 \
+  '/usr/bin/python3.12 /home/yu/.hermes/scripts/stock_quote.py realtime sh600519'
+```
+
+### 注意事项
+- 龙爪机器必须在线（Hermes 运行中）
+- SSH首次连接需加 `-o StrictHostKeyChecking=no` 避免交互
+- **历史变更**：2026-04-27 启用 adata → 2026-07-19 弃用 adata 改用 stock_quote
+- **依赖**：仅 Python 3.12+ stdlib（urllib/re/json/argparse），无需第三方库
+
+---
+
+## 🎯 A股数据源分工原则（2026-07-31 老大明确拍板）
+
+### 📜 历史数据源：**咸鱼tushare镜像接口**
+
+| 项目 | 配置 |
+|------|------|
+| 镜像站 | `https://ai-tool.indevs.in/tushare/pro` |
+| API Key | `huanghanchi`（咸鱼买的，老大 2026-07-24 给） |
+| 客户端 | `/home/YDL/.openclaw/workspace/scripts/tushare_client.py` |
+| 本地缓存 | `/home/YDL/.openclaw/workspace/cache_temp/tushare_replay/`（1小时TTL） |
+| 数据延迟 | **T+1**（最新只能拉到昨日收盘） |
+
+**支持接口（30+）**：`daily` / `fund_daily` / `index_daily` / `moneyflow_hsgt` / `limit_list_d` / `limit_list` / `top_list` / `top_inst` / `ths_index` / `ths_member` / `income` / `balancesheet` / `cashflow` / `fina_indicator` / `adj_factor` / `suspend` / `margin` / `margin_detail` 等
+
+**适用场景**：
+- ✅ 历史K线回测
+- ✅ 北向资金 / 龙虎榜 / 涨停池 复盘
+- ✅ 财务三表 / 财务指标 基本面分析
+- ✅ 同花顺板块成分 / 板块行情
+- ✅ 复权因子 / 停复牌信息
+
+### 📡 盘中实时数据源：**stock_quote.py 三源聚合**
+
+| 数据源 | URL | 用途 |
+|-------|-----|------|
+| 腾讯 qt.gtimg.cn | `https://qt.gtimg.cn/q={market}{code}` | **实时行情 + 5档**（盘中首选） |
+| 新浪 hq.sinajs.cn | `https://hq.sinajs.cn/list={market}{code}` | **实时行情 + 集合竞价 prev_close 准** |
+| 东方财富 push2.eastmoney.com | - | **批量报价**（多股最快） |
+| 新浪 K 线 API | - | 历史 K 线（备用） |
+
+| 项目 | 配置 |
+|------|------|
+| 客户端 | `/home/yu/.hermes/scripts/stock_quote.py`（龙爪机器） |
+| 调用方式 | SSH 192.168.31.141 调用 |
+| 延迟 | **实时**（秒级） |
+
+**适用场景**：
+- ✅ 盘中实时报价 / 5档盘口
+- ✅ 加仓信号触发监控
+- ✅ 止损 / 止盈实时预警
+- ✅ 集合竞价数据
+- ✅ 批量报价（多股快速扫描）
+
+### 📊 数据源决策表
+
+| 场景 | 用哪个 |
+|------|--------|
+| 盘中"现价多少？" | 📡 **stock_quote**（实时） |
+| 收盘后"今天涨了多少？" | 📜 **tushare** daily（T+1） |
+| "这只票历史走势？" | 📜 **tushare** daily |
+| "今天涨停了哪些？" | 📜 **tushare** limit_list_d |
+| "北向今天净流入？" | 📜 **tushare** moneyflow_hsgt |
+| "现在该不该止损？" | 📡 **stock_quote**（实时） |
+| "基本面怎么样？" | 📜 **tushare** fina_indicator |
+| "板块成分股？" | 📜 **tushare** ths_member |
+| 盘中"加仓信号触发了吗？" | 📡 **stock_quote**（实时） |
+| "回测过去30天走势？" | 📜 **tushare** daily |
+
+### 🚨 绝对不能再犯的反面案例
+
+- ❌ **跑去看龙爪机器的 `/home/yu/.hermes/cache/stock_data/xianyu_tushare/`** → 那是龙爪自己备份的旧副本，不是数据源！
+- ❌ **用 tushare 拉盘中现价** → tushare 只有 T+1 数据，盘中最新的永远是昨天的收盘价！
+- ❌ **用 stock_quote 拉长期历史K线** → 只能拉最近120天左右的数据，回测不够用！
 
 ## 💓 Heartbeats - Be Proactive!
 
