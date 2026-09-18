@@ -172,16 +172,17 @@ FEISHU_BOT_URL = "https://open.feishu.cn/open-apis/bot/v2/hook/fbfd7f01-878c-4ec
 FEISHU_SECRET = "9vXyEvLigZ70Ynw1YeUtI"
 
 # 自选股池（未建仓，等待买入提醒）
-# === 2026-06-18 收盘后基于前3天重新设定区间 ===
-# 自选股池（未建仓，等待买入提醒）
-# === 2026-07-01 更新：只监控ETF接回，移除个股持仓监控（已集成到auto_stock_alert.py） ===
-# 移除：长江电力、鼎胜新材（移到auto_stock_alert.py监控）
-# 保留：ETF接回监控（只推送触发条件，不触发静默）
+# === 2026-09-19 收盘后重新评估更新 ===
+# 候选股买入区间（来自候选股重新评估脚本）
 WATCHLIST = {
-    '515980': {'name': '人工智能ETF', 'targets': [1.146, 1.046, 0.989], 'notes': ['第1批-MA20', '第2批-MA60', '第3批-0.618回撤'], 'done_batches': set()},
-    '588080': {'name': '科创50ETF', 'targets': [1.796, 1.625, 1.563], 'notes': ['第1批-MA20', '第2批-MA60', '第3批-0.618回撤'], 'done_batches': set()},
-    '512480': {'name': '半导体ETF', 'targets': [2.223, 1.908, 1.861], 'notes': ['第1批-MA20', '第2批-MA60', '第3批-0.618回撤'], 'done_batches': set()},
-    '159516': {'name': '半导体设备ETF', 'targets': [1.333, 1.292], 'notes': ['第1批-MA20', '第2批-止损'], 'done_batches': set()},
+    '002475': {'name': '立讯精密', 'buy_low': 50.6, 'buy_high': 54.74, 'stop': 48.07, 'target_low': 51.86, 'target_high': 54.74, 'note': '距MA20 -1.8%'},
+    '300552': {'name': '万集科技', 'buy_low': 19.6, 'buy_high': 21.69, 'stop': 18.62, 'target_low': 20.55, 'target_high': 21.69, 'note': '距MA20 -3.4%'},
+    '600552': {'name': '凯盛科技', 'buy_low': 17.1, 'buy_high': 17.47, 'stop': 16.25, 'target_low': 16.55, 'target_high': 17.47, 'note': '距MA20 +2.8%'},
+    '300613': {'name': '富瀚微', 'buy_low': 71.04, 'buy_high': 74.24, 'stop': 67.48, 'target_low': 71.89, 'target_high': 75.89, 'note': '距MA20 +10.7%，高位观望'},
+    '603876': {'name': 'XD鼎胜新材', 'buy_low': 18.29, 'buy_high': 21.34, 'stop': 17.37, 'target_low': 21.21, 'target_high': 22.39, 'note': '距MA20 -8.5%'},
+    '300623': {'name': '捷捷微电', 'buy_low': 30.91, 'buy_high': 30.91, 'stop': 29.36, 'target_low': 31.77, 'target_high': 33.53, 'note': '距MA20 +17.6%，高位观望'},
+    '002407': {'name': '多氟多', 'buy_low': 31.2, 'buy_high': 34.77, 'stop': 29.64, 'target_low': 33.25, 'target_high': 35.09, 'note': '距MA20 -1.6%'},
+    '603379': {'name': '三美股份', 'buy_low': 50.12, 'buy_high': 57.43, 'stop': 47.61, 'target_low': 54.41, 'target_high': 57.43, 'note': '距MA20 -10.3%'},
 }
 
 # ============ 已移除个股持仓监控 ============
@@ -303,38 +304,72 @@ def is_trading_hours():
     return in_morning or in_afternoon
 
 def check_watchlist():
-    """检查ETF是否跌到接回区间，只推送触发条件，不触发静默"""
+    """检查候选股是否进入买入区间，触发缩量确认提醒"""
     codes = list(WATCHLIST.keys())
     quotes = get_realtime(codes)
+    
+    # 获取成交量数据
+    try:
+        today_vol = get_volume_from_sina(codes)
+        avg_vol = get_5day_avg_volume(codes)
+    except Exception as e:
+        print(f"[成交量] 获取失败: {e}")
+        today_vol, avg_vol = {}, {}
     
     alerts = []
     for code, info in WATCHLIST.items():
         if code not in quotes:
             continue
         price = quotes[code]['price']
+        buy_low = info['buy_low']
+        buy_high = info['buy_high']
         
-        # 检查是否跌到任意接回目标价
-        for i, target in enumerate(info['targets']):
-            if i in info['done_batches']:
-                continue  # 已触发的批次跳过
-            if price <= target:
-                note = info['notes'][i] if i < len(info['notes']) else f'第{i+1}批'
-                alert = f"🚨{info['name']}({code}) 触发接回！\n现价{price:.3f} ≤ 目标{target:.3f}（{note}）\n建议买入操作"
-                alerts.append((code, alert, i))
-                info['done_batches'].add(i)
-                break  # 每个ETF只报一次
+        # 检查是否在买入区间
+        if not (buy_low <= price <= buy_high):
+            continue
+        
+        name = info['name']
+        stop = info['stop']
+        target_low = info['target_low']
+        target_high = info['target_high']
+        note = info.get('note', '')
+        
+        # 成交量检查
+        today_v = today_vol.get(code, 0)
+        avg_v = avg_vol.get(code, 0)
+        
+        if today_v == 0:
+            print(f"[数据缺失] {name} 价格到位但无法获取今日成交量，暂不提醒")
+            continue
+        
+        contracted = is_volume_contracted(code, today_v, avg_v)
+        vol_str = f"{today_v/10000:.1f}万" if today_v > 0 else "未知"
+        avg_str = f"{avg_v/10000:.1f}万" if avg_v > 0 else "未知"
+        
+        if not contracted:
+            print(f"[条件未满足] {name} 价格到位但未缩量 成交量: {vol_str} (5日均量{avg_str}) - 未缩量")
+            continue
+        
+        # 触发买入提醒
+        alert = (f"🎯买入提醒(缩量确认)\n"
+                 f"{name}({code}) 现价{price:.2f}元\n"
+                 f"已进入买入区间: {buy_low}-{buy_high}\n\n"
+                 f"成交量: {vol_str} (5日均量{avg_str})\n"
+                 f"备注: 止损{stop} 目标{target_low}-{target_high} {note}")
+        alerts.append((code, alert))
+        print(f"\n{'='*50}\n{alert}\n{'='*50}")
     
     return alerts
 
 def main():
     print("="*60)
-    print("📋 ETF接回监控脚本启动")
+    print("📋 候选股买入信号监控脚本启动")
     print("="*60)
     print(f"监控标的: {len(WATCHLIST)} 只")
     for code, info in WATCHLIST.items():
-        print(f"  {code} {info['name']} 接回目标: {info['targets']}")
+        print(f"  {code} {info['name']} 买入区间:{info['buy_low']}-{info['buy_high']}")
     print("="*60)
-    print("规则: 只有触发接回价时才推送，不触发静默")
+    print("规则: 价格进入买入区间 + 缩量确认才推送")
     print()
     
     last_alert_time = {}
@@ -350,7 +385,7 @@ def main():
             
             alerts = check_watchlist()
             
-            for code, alert, batch_idx in alerts:
+            for code, alert in alerts:
                 if code in last_alert_time:
                     if (now - last_alert_time[code]).seconds < 300:
                         continue
