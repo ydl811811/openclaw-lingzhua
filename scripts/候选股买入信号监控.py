@@ -172,17 +172,17 @@ FEISHU_BOT_URL = "https://open.feishu.cn/open-apis/bot/v2/hook/fbfd7f01-878c-4ec
 FEISHU_SECRET = "9vXyEvLigZ70Ynw1YeUtI"
 
 # 自选股池（未建仓，等待买入提醒）
-# === 2026-09-28 收盘后重新评估更新 ===
+# === 2026-09-29 收盘后重新评估更新 ===
 # 候选股买入区间（来自候选股重新评估脚本）
 WATCHLIST = {
-    '002475': {'name': '立讯精密', 'buy_low': 50.46, 'buy_high': 54.74, 'stop': 47.94, 'target_low': 51.86, 'target_high': 54.74, 'note': '距MA20 -8.2%'},
-    '300552': {'name': '万集科技', 'buy_low': 19.29, 'buy_high': 21.69, 'stop': 18.33, 'target_low': 20.55, 'target_high': 21.69, 'note': '距MA20 -7.2%'},
-    '600552': {'name': '凯盛科技', 'buy_low': 17.77, 'buy_high': 17.63, 'stop': 16.88, 'target_low': 16.7, 'target_high': 17.63, 'note': '距MA20 +2.6%，区间倒挂'},
-    '300613': {'name': '富瀚微', 'buy_low': 82.63, 'buy_high': 78.15, 'stop': 78.5, 'target_low': 78.19, 'target_high': 82.54, 'note': '距MA20 +8.1%，区间倒挂'},
-    '603876': {'name': '鼎胜新材', 'buy_low': 17.15, 'buy_high': 20.01, 'stop': 16.29, 'target_low': 20.2, 'target_high': 21.33, 'note': '距MA20 -12.9%'},
-    '300623': {'name': '捷捷微电', 'buy_low': 33.62, 'buy_high': 32.01, 'stop': 31.94, 'target_low': 31.77, 'target_high': 33.53, 'note': '距MA20 +6.3%，区间倒挂'},
-    '002407': {'name': '多氟多', 'buy_low': 30.1, 'buy_high': 33.93, 'stop': 28.59, 'target_low': 32.82, 'target_high': 34.65, 'note': '距MA20 -9.7%'},
-    '603379': {'name': '三美股份', 'buy_low': 48.71, 'buy_high': 56.44, 'stop': 46.27, 'target_low': 53.53, 'target_high': 56.51, 'note': '距MA20 -9.3%'},
+    '002475': {'name': '立讯精密', 'buy_low': 49.69, 'buy_high': 54.23, 'stop': 47.21, 'target_low': 51.37, 'target_high': 54.23, 'note': '距MA20 -6.7%'},
+    '300552': {'name': '万集科技', 'buy_low': 19.27, 'buy_high': 21.69, 'stop': 18.3, 'target_low': 20.55, 'target_high': 21.69, 'note': '距MA20 -4.5%'},
+    '600552': {'name': '凯盛科技', 'buy_low': 17.06, 'buy_high': 17.63, 'stop': 16.21, 'target_low': 16.7, 'target_high': 17.63, 'note': '距MA20 -1.2%'},
+    '300613': {'name': '富瀚微', 'buy_low': 82.67, 'buy_high': 78.28, 'stop': 78.53, 'target_low': 78.19, 'target_high': 82.54, 'note': '距MA20 +8.6%'},
+    '603876': {'name': '鼎胜新材', 'buy_low': 16.89, 'buy_high': 19.74, 'stop': 16.04, 'target_low': 19.56, 'target_high': 20.64, 'note': '距MA20 -10.2%'},
+    '300623': {'name': '捷捷微电', 'buy_low': 33.19, 'buy_high': 32.16, 'stop': 31.53, 'target_low': 31.77, 'target_high': 33.53, 'note': '距MA20 +5.2%'},
+    '002407': {'name': '多氟多', 'buy_low': 29.49, 'buy_high': 33.12, 'stop': 28.01, 'target_low': 31.37, 'target_high': 33.12, 'note': '距MA20 -8.7%'},
+    '603379': {'name': '三美股份', 'buy_low': 48.06, 'buy_high': 55.94, 'stop': 45.66, 'target_low': 53.53, 'target_high': 56.51, 'note': '距MA20 -9.7%'},
 }
 
 # ============ 已移除个股持仓监控 ============
