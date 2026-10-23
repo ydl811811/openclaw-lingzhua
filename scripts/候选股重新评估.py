@@ -13,7 +13,10 @@ import re
 from datetime import datetime
 
 FEISHU_BOT_URL = "https://open.feishu.cn/open-apis/bot/v2/hook/fbfd7f01-878c-4ece-80e6-5e7324ab3692"
-FEISHU_SECRET = "9vXyEv…eUtI"
+# 2026-10-23 修复：原值被写成 "9vXyEv…eUtI"（省略号占位），导致签名校验失败，
+# 但 send_feishu() 不检查响应体，脚本仍打印 "✅ 报告已发送到飞书" —— 静默丢报告。
+# 正确值与 候选股买入信号监控.py / auction_monitor.py 保持一致。
+FEISHU_SECRET = "9vXyEvLigZ70Ynw1YeUtI"
 
 # 候选股列表（从监控脚本读取）
 WATCHLIST_CODES = ['002475', '300552', '600552', '300613', '603876', '300623', '002407', '603379']
@@ -81,13 +84,27 @@ def calculate_buy_zone(price, ma5, ma20, low30, high30):
         buy_low = max(ma5 * 0.95, low30 * 0.98)
     
     buy_high = min(ma20 * 1.03, high30 * 0.95)
+
+    # 2026-10-23 修复：原实现可能出现 buy_low > buy_high（区间倒挂）。
+    # 典型场景：ma20*1.03 较大但 high30*0.95 更小，取 min 后 buy_high < buy_low。
+    # 倒挂区间会让监控脚本的 `buy_low <= price <= buy_high` 恒不成立 → 买入提醒静默失效
+    # （2026-10-23 万集科技 300552 算出 20.05-19.94 即此情况）。
+    # 现在强制保证区间非倒挂，且至少保留 3% 宽度。
+    MIN_BAND = 0.03
+    if buy_high < buy_low * (1 + MIN_BAND):
+        buy_high = buy_low * (1 + MIN_BAND)
     
     # 计算止损（跌破买入区间下沿-5%）
     stop = buy_low * 0.95
-    
-    # 计算目标（30日高点或买入区间上方15%）
-    target_low = high30 * 0.9
-    target_high = high30 * 0.95
+
+    # 2026-10-23 修复：原实现 target = high30 * 0.9 ~ high30 * 0.95，
+    # 与买入区间无因果关系，可能出现「目标价 < 买入区间上沿」——即买入即浮亏，
+    # 提醒文案自相矛盾（例：300552 买入 20.05，目标 18.89-19.94）。
+    # 现在目标统一从 buy_high 向上推，并参考 30 日高点作为上方阻力参考。
+    target_low = buy_high * 1.05
+    target_high = max(target_low * 1.03, min(high30 * 1.02, buy_high * 1.18))
+    if target_high <= target_low:
+        target_high = target_low * 1.03
     
     return {
         'buy_low': round(buy_low, 2),
@@ -98,17 +115,22 @@ def calculate_buy_zone(price, ma5, ma20, low30, high30):
     }
 
 def send_feishu(msg):
-    """发送飞书消息"""
+    """发送飞书消息
+
+    2026-10-23 修复：原实现不解析响应体，飞书返回 HTTP 200 但 body 里
+    {"code":19021,"msg":"sign match fail"} 时也会被当成成功，导致报告静默丢失。
+    现在必须校验 body 中的 code==0，否则抛异常由调用方显式处理。
+    """
     import hashlib
     import hmac
     import base64
     import urllib.request
-    
+
     now = time.time()
     timestamp = str(int(now))
     string_to_sign = timestamp + '\n' + FEISHU_SECRET
     sign = base64.b64encode(hmac.new(string_to_sign.encode(), digestmod=hashlib.sha256).digest()).decode()
-    
+
     payload = {
         "msg_type": "text",
         "content": {"text": msg},
@@ -118,10 +140,24 @@ def send_feishu(msg):
     data = json.dumps(payload).encode('utf-8')
     req = urllib.request.Request(FEISHU_BOT_URL, data=data, headers={'Content-Type': 'application/json'})
     try:
-        with urllib.request.urlopen(req, timeout=10):
-            pass
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = resp.read().decode('utf-8')
     except Exception as e:
-        print(f"发送失败: {e}")
+        print(f"❌ 发送失败(网络异常): {e}")
+        return False
+
+    try:
+        parsed = json.loads(body)
+    except Exception:
+        print(f"❌ 发送失败(响应无法解析): {body[:200]}")
+        return False
+
+    if parsed.get('code') == 0:
+        print(f"✅ 飞书投递成功: {body[:120]}")
+        return True
+
+    print(f"❌ 发送失败(飞书返回错误): code={parsed.get('code')} msg={parsed.get('msg')}")
+    return False
 
 def main():
     print("="*60)
@@ -195,9 +231,12 @@ def main():
         print(report)
         print("="*60)
         
-        # 发送到飞书
-        send_feishu(report)
-        print("\n✅ 报告已发送到飞书")
+        # 发送到飞书（校验返回码，失败不谎报成功）
+        sent = send_feishu(report)
+        if sent:
+            print("\n✅ 报告已发送到飞书")
+        else:
+            print("\n❌ 报告发送失败！请检查飞书 webhook 配置")
         
         # 保存结果到文件
         save_path = f"/home/YDL/.openclaw/workspace/a_stock_plan/daily/{datetime.now().strftime('%Y-%m-%d')}/候选股评估_{datetime.now().strftime('%Y%m%d_%H%M')}.json"

@@ -181,17 +181,18 @@ FEISHU_BOT_URL = "https://open.feishu.cn/open-apis/bot/v2/hook/fbfd7f01-878c-4ec
 FEISHU_SECRET = "9vXyEvLigZ70Ynw1YeUtI"
 
 # 自选股池（未建仓，等待买入提醒）
-# === 2026-10-21 收盘后重新评估更新 ===
-# 候选股买入区间（来自候选股重新评估脚本 2026-10-21 14:48）
+# === 2026-10-23 收盘后重新评估更新 ===
+# 候选股买入区间（来自候选股重新评估脚本 2026-10-23 15:35）
+# 数据源：a_stock_plan/daily/2026-10-23/候选股评估_20261023_1535.json
 WATCHLIST = {
-    '002475': {'name': '立讯精密', 'buy_low': 43.76, 'buy_high': 51.12, 'stop': 41.57, 'target_low': 49.36, 'target_high': 52.1, 'note': '距MA20 -3.4%'},
-    '300552': {'name': '万集科技', 'buy_low': 19.93, 'buy_high': 19.94, 'stop': 18.93, 'target_low': 18.89, 'target_high': 19.94, 'note': '距MA20 +0.6% 区间过窄'},
-    '600552': {'name': '凯盛科技', 'buy_low': 13.15, 'buy_high': 16.62, 'stop': 12.49, 'target_low': 16.7, 'target_high': 17.63, 'note': '距MA20 -15.7% 深度回调'},
-    '300613': {'name': '富瀚微', 'buy_low': 65.27, 'buy_high': 78.2, 'stop': 62.0, 'target_low': 78.19, 'target_high': 82.54, 'note': '距MA20 -10.9%'},
-    '603876': {'name': '鼎胜新材', 'buy_low': 14.89, 'buy_high': 17.85, 'stop': 14.14, 'target_low': 17.22, 'target_high': 18.17, 'note': '距MA20 -14.2%'},
-    '300623': {'name': '捷捷微电', 'buy_low': 27.76, 'buy_high': 32.6, 'stop': 26.38, 'target_low': 31.77, 'target_high': 33.53, 'note': '距MA20 -8.4%'},
-    '002407': {'name': '多氟多', 'buy_low': 24.59, 'buy_high': 30.68, 'stop': 23.36, 'target_low': 29.89, 'target_high': 31.55, 'note': '距MA20 -15.7% 深度回调'},
-    '603379': {'name': '三美股份', 'buy_low': 42.64, 'buy_high': 49.82, 'stop': 40.51, 'target_low': 47.7, 'target_high': 50.35, 'note': '距MA20 -9.1%'},
+    '002475': {'name': '立讯精密', 'buy_low': 48.1, 'buy_high': 50.55, 'stop': 45.69, 'target_low': 53.08, 'target_high': 55.94, 'note': '距MA20 +2.7%'},
+    '300552': {'name': '万集科技', 'buy_low': 20.05, 'buy_high': 20.66, 'stop': 19.05, 'target_low': 21.69, 'target_high': 22.34, 'note': '距MA20 +1.6%'},
+    '600552': {'name': '凯盛科技', 'buy_low': 12.97, 'buy_high': 16.01, 'stop': 12.32, 'target_low': 16.81, 'target_high': 18.89, 'note': '距MA20 -13.2%'},
+    '300613': {'name': '富瀚微', 'buy_low': 63.43, 'buy_high': 77.51, 'stop': 60.26, 'target_low': 81.39, 'target_high': 88.62, 'note': '距MA20 -7.9%'},
+    '603876': {'name': '鼎胜新材', 'buy_low': 14.33, 'buy_high': 17.23, 'stop': 13.61, 'target_low': 18.09, 'target_high': 19.34, 'note': '距MA20 -11.1%'},
+    '300623': {'name': '捷捷微电', 'buy_low': 27.64, 'buy_high': 32.21, 'stop': 26.25, 'target_low': 33.82, 'target_high': 36.01, 'note': '距MA20 -8.4%'},
+    '002407': {'name': '多氟多', 'buy_low': 23.4, 'buy_high': 29.38, 'stop': 22.23, 'target_low': 30.85, 'target_high': 33.87, 'note': '距MA20 -16.2%'},
+    '603379': {'name': '三美股份', 'buy_low': 41.32, 'buy_high': 48.45, 'stop': 39.25, 'target_low': 50.88, 'target_high': 52.8, 'note': '距MA20 -8.4%'},
 }
 
 # ============ 已移除个股持仓监控 ============
@@ -275,7 +276,7 @@ def send_alert(msg):
         timestamp = str(int(now))
         string_to_sign = timestamp + '\n' + FEISHU_SECRET
         sign = base64.b64encode(hmac.new(string_to_sign.encode(), digestmod=hashlib.sha256).digest()).decode()
-        
+
         payload = {
             "msg_type": "text",
             "content": {"text": msg},
@@ -288,8 +289,19 @@ def send_alert(msg):
             data=data,
             headers={'Content-Type': 'application/json'}
         )
-        with urllib.request.urlopen(req, timeout=10):
-            pass
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = resp.read().decode('utf-8')
+        # 2026-10-23 修复：不校验响应体时，飞书返回 code=19021（签名失败）也会被当成发送成功，
+        # 买入提醒会静默丢失。现在必须 code==0 才算成功。
+        try:
+            parsed = json.loads(body)
+        except Exception:
+            print(f"❌ 发送失败(响应无法解析): {body[:200]}")
+            return
+        if parsed.get('code') != 0:
+            print(f"❌ 发送失败(飞书返回错误): code={parsed.get('code')} msg={parsed.get('msg')}")
+            return
+        print(f"✅ 提醒已投递: {body[:120]}")
     except Exception as e:
         print(f"发送失败: {e}")
 
