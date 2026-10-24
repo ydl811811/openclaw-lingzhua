@@ -44,11 +44,18 @@ import pandas as pd
 
 # ============== 配置 ==============
 BASE_URL = "https://ai-tool.indevs.in/tushare/pro"
-# Key 池（老大 2026-08-17 给的两个新 key，旧的 huanghanchi 已失效）
-# 优先使用环境变量 TUSHARE_RELAY_KEY，否则从下面按顺序轮询
+# Key 池（老大 2026-08-17 给的两个 key，旧的 huanghanchi 已失效）
+# 优先使用环境变量 TUSHARE_RELAY_KEY，否则从下面按顺序轮询。
+#
+# 2026-10-24 修正：池顺序原为 [b64c6ee7, e58c1ffe]，但实测
+#   b64c6ee7 → HTTP 403 permission_denied（该 key 权限已过期）
+#   e58c1ffe → code=0 正常返回日线
+# 客户端默认取 pool[0]，导致 daily 等接口全线 403，且失败被当成
+# "无数据"缓存 1 小时（24 个 daily 缓存有 22 个是空的）。
+# 现把可用 key 提到首位，并加 403 自动轮换，见 _request。
 API_KEY_POOL = [
-    "b64c6ee7023944c8e6502ce1e95b6c356d70027c14e74a7778720ce0",  # Key 2（直连可用）
-    "e58c1ffea3ad1fc14801b4516c3c5a7314fba16160c990e0ab0151df",  # Key 1（走代理可用）
+    "e58c1ffea3ad1fc14801b4516c3c5a7314fba16160c990e0ab0151df",  # Key 1（2026-10-24 实测可用）
+    "b64c6ee7023944c8e6502ce1e95b6c356d70027c14e74a7778720ce0",  # Key 2（2026-10-24 实测 403，保留备用）
 ]
 DEFAULT_API_KEY = os.environ.get("TUSHARE_RELAY_KEY") or API_KEY_POOL[0]
 CACHE_DIR = Path("/home/YDL/.openclaw/workspace/cache_temp/tushare_replay")
@@ -106,9 +113,19 @@ def cache(ttl_seconds: int = 3600):
             result = func(self, *args, **kwargs)
 
             # 写缓存
+            # 2026-10-24 修正：失败时 result 是空 DataFrame（_request 兜底返回
+            # code=-1 + items=[]），原先照样写缓存，等于把"接口失败"伪装成
+            # "该标的无数据"缓存 1 小时，排障时极具误导性。
+            # 现在：空结果一律不落盘，并清理可能已存在的空缓存。
             try:
-                with open(cache_path, "w", encoding="utf-8") as f:
-                    json.dump(result.to_dict(orient="records"), f, ensure_ascii=False, default=str)
+                records = result.to_dict(orient="records")
+                if not records:
+                    if cache_path.exists():
+                        cache_path.unlink()
+                    log.warning(f"{func.__name__} 返回空结果，不写缓存（避免失败伪装成无数据）")
+                else:
+                    with open(cache_path, "w", encoding="utf-8") as f:
+                        json.dump(records, f, ensure_ascii=False, default=str)
             except Exception as e:
                 log.warning(f"缓存写入失败: {e}")
 
@@ -137,6 +154,18 @@ class TushareClient:
         if elapsed < RATE_LIMIT_INTERVAL:
             time.sleep(RATE_LIMIT_INTERVAL - elapsed)
         _last_call_time = time.time()
+
+    def _rotate_key(self, api_name: str, reason: str) -> bool:
+        """当前 key 不可用时，轮换到 key 池里的下一个。返回是否成功切换。"""
+        current = self.api_key
+        for key in API_KEY_POOL:
+            if key != current:
+                log.warning(f"{api_name} 当前 key 不可用({reason[:60]})，轮换到 {key[:10]}...{key[-4:]}")
+                self.api_key = key
+                self.session.headers.update({"X-API-Key": key})
+                return True
+        log.error(f"{api_name} key 池全部不可用")
+        return False
 
     def _request(self, api_name: str, params: Optional[Dict] = None, fields: Optional[str] = None,
                  max_retries: int = 3) -> Dict:
@@ -167,6 +196,11 @@ class TushareClient:
                 elapsed_ms = int((time.time() - start) * 1000)
 
                 if resp.status_code != 200:
+                    # 2026-10-24 修正：403 通常是"该 key 权限过期"，
+                    # 换池里下一个 key 重试，而不是把同一个坏 key 重试 3 次。
+                    if resp.status_code == 403 and self._rotate_key(api_name, resp.text[:120]):
+                        attempt -= 1  # 换 key 不算重试次数
+                        continue
                     raise Exception(f"HTTP {resp.status_code}: {resp.text[:200]}")
 
                 data = resp.json()
@@ -185,6 +219,10 @@ class TushareClient:
                     if "invalid_api_key" in err:
                         log.error(f"{api_name} API Key 无效: {msg}")
                         return {"api": api_name, "code": -1, "msg": msg, "items": []}
+                    # permission_denied → 该 key 权限过期，换下一个 key
+                    if "permission_denied" in err and self._rotate_key(api_name, msg[:120]):
+                        attempt -= 1
+                        continue
                     raise Exception(f"业务错误 err={err} msg={msg}")
 
                 # code 非 0 视为业务错误
