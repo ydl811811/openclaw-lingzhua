@@ -283,9 +283,32 @@ def execute():
                 "shares": p["shares"], "gross_pnl": round(gross, 2), "fee": fee,
                 "at": datetime.now().isoformat()
             })
-            tv0 = sum(q["shares"] * q["close"] for q in d["positions"])
+            # 剩余持仓按实时价重估（不用残留 close 字段，那是旧快照）
+            tv0 = 0.0
+            for q in d["positions"]:
+                qpx = quotes.get(q["code"], {}).get("price") or q["close"]
+                q["close"] = qpx
+                q["market_value"] = round(q["shares"] * qpx, 2)
+                if q.get("cost"):
+                    q["pnl_pct"] = round((qpx - q["cost"]) / q["cost"] * 100, 2)
+                tv0 += q["shares"] * qpx
             d["total_asset"] = round(d["cash"] + tv0, 2)
             d["total_return_pct"] = round((d["total_asset"] / d["capital"] - 1) * 100, 2)
+            d["as_of"] = datetime.now().isoformat()
+            # 清掉已平仓标的的遗留条件单
+            d["pending_orders"] = [o for o in d.get("pending_orders", []) if o.get("code") != p["code"]]
+            # risk_flags 随持仓变化重建，避免残留过期描述
+            d["risk_flags"] = []
+            for q in d["positions"]:
+                qsl = q.get("stop_loss")
+                if qsl and quotes.get(q["code"], {}).get("price"):
+                    gap = quotes[q["code"]]["price"] - qsl
+                    d["risk_flags"].append(
+                        f"{q['code']} {q['name']} 现价 {quotes[q['code']]['price']}，止损 {qsl}，"
+                        f"安全垫 {gap:.3f}（{gap / qsl * 100:+.2f}%）")
+            pos_ratio = (tv0 / d["total_asset"] * 100) if d["total_asset"] else 0
+            d["risk_flags"].append(
+                f"仓位 {pos_ratio:.2f}%（{len(d['positions'])} 只），现金 {d['cash']:,.2f}")
             md += (f"### 🔴 自动止损 {p['code']} {p['name']}\n"
                    f"- 现价 ¥{px:.2f} <= 止损 ¥{sl}\n- 数量 {p['shares']}股\n"
                    f"- 金额 ¥{p['shares']*px:,.2f}\n- 手续费 ¥{fee:.2f}\n"
@@ -318,8 +341,21 @@ def execute():
 
         if act == "sell_all":
             if not pos:
-                log(f"跳过 {code}: 无持仓")
-                x["status"] = "skipped"
+                # 持仓已不存在：查自动止损日志，若是被止损分支先平的，标记为 executed 而非 skipped
+                prior = next((s for s in d.get("auto_stop_log", [])
+                              if s.get("code") == code and s.get("at", "") >= (x.get("created_at") or "")), None)
+                if prior:
+                    log(f"指令 {x['id']}: {code} 已于 {prior['at']} 被自动止损平仓，按已执行处理")
+                    x["status"] = "executed"
+                    x["executed_via"] = "auto_stop_loss"
+                    x["executed_price"] = prior.get("price")
+                    x["executed_at"] = prior.get("at")
+                    x["note"] = (f"开盘/盘中自动止损分支先于本指令执行并清仓 {prior.get('shares')} 股"
+                                 f"（成交价 {prior.get('price')}），本指令无需重复执行。")
+                else:
+                    log(f"跳过 {code}: 无持仓")
+                    x["status"] = "skipped"
+                    x["note"] = x.get("note", "") + " | 执行时已无持仓（此前已平仓或从未建仓）"
                 continue
             if px is None:
                 log(f"跳过 {code}: 无行情")
