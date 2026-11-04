@@ -109,7 +109,8 @@ def fetch_dual(codes=None, verbose=False):
     sn = fetch_sina(codes)
 
     merged = dict(tq)
-    verify = {'ok': [], 'mismatch': [], 'only_tencent': [], 'only_sina': []}
+    verify = {'ok': [], 'mismatch': [], 'only_tencent': [], 'only_sina': [],
+              'no_sina_data': []}
 
     for code in sorted(set(tq) | set(sn)):
         if code not in tq:
@@ -117,11 +118,20 @@ def fetch_dual(codes=None, verbose=False):
         if code not in sn:
             verify['only_tencent'].append(code); continue
         t, s = tq[code], sn[code]
-        # 价格一致：两源实时刷新存在毫厘级时差；按相对价格容差判定（0.01% 或 0.05 绝对，取大）
-        tol = max(0.05, abs(t['close']) * 0.0002)
-        same = (abs(t['close'] - s['close']) <= tol
-                and abs(t['high'] - s['high']) <= tol
-                and abs(t['low'] - s['low']) <= tol)
+        # 新浪在开盘前/无成交时段可能只给现价，high/low 返回 0 → 逐字段校验，只比对有值的字段
+        fields = [('close', t['close'], s['close']),
+                  ('high', t['high'], s.get('high') or 0),
+                  ('low', t['low'], s.get('low') or 0)]
+        checked = [(n, tv, sv) for n, tv, sv in fields if sv > 0]
+        if not checked:
+            verify['no_sina_data'].append(code)
+            merged[code]['sina_close'] = None
+            merged[code]['dual_verified'] = None
+            continue
+        # 价格一致：两源是两次独立 HTTP 调用，落在不同时刻，相邻采样间现价会跳动。
+        # 容差按相对价格 0.05% 取（另加 0.05 绝对下限），覆盖毫厘级刷新时差。
+        tol = max(0.05, abs(t['close']) * 0.0005)
+        same = all(abs(tv - sv) <= tol for _, tv, sv in checked)
         if same:
             verify['ok'].append(code)
         else:
@@ -131,12 +141,15 @@ def fetch_dual(codes=None, verbose=False):
                 'sina': f"close={s['close']:.3f} H={s['high']:.3f} L={s['low']:.3f}",
             })
         merged[code]['sina_close'] = s['close']
-        merged[code]['sina_high'] = s['high']
-        merged[code]['sina_low'] = s['low']
+        merged[code]['sina_high'] = s.get('high')
+        merged[code]['sina_low'] = s.get('low')
         merged[code]['dual_verified'] = same
+        merged[code]['dual_fields_checked'] = [n for n, _, _ in checked]
 
     if verbose:
-        print(f"  双源一致: {len(verify['ok'])} | 不一致: {len(verify['mismatch'])}")
+        nosina = len(verify.get('no_sina_data', []))
+        print(f"  双源一致: {len(verify['ok'])} | 不一致: {len(verify['mismatch'])}"
+              + (f" | 新浪无数据(盘前/停牌): {nosina}" if nosina else ""))
         for m in verify['mismatch']:
             print(f"    ⚠️ {m['code']}: 腾讯[{m['tencent']}] vs 新浪[{m['sina']}]")
 

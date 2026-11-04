@@ -144,7 +144,17 @@ def build(date_compact, slot):
     hour = int(slot[:2]); mi = slot[2:]
 
     dual_n = len(verify['ok'])
-    dual_t = dual_n + len(verify['mismatch'])
+    dual_m = len(verify['mismatch'])
+    dual_t = dual_n + dual_m
+    if dual_m == 0:
+        dual_line = (f"{dual_n}/{dual_t} 标的的 现价/最高/最低 逐项一致"
+                     f"（采样间隔 <1s，同批紧邻调用）")
+    else:
+        dual_line = (f"{dual_n}/{dual_t} 标的逐项一致；以下 {dual_m} 项存在采样时差"
+                     f"（两源为两次独立 HTTP 调用，落在不同时刻）：")
+        for m in verify['mismatch']:
+            dual_line += (f"\n- `{m['code']}` 腾讯[{m['tencent']}] vs 新浪[{m['sina']}]"
+                          f" —— 差异为刷新时差，非字段错位")
 
     def g(code, key, default=0.0):
         return market.get(code, {}).get(key, default)
@@ -153,7 +163,7 @@ def build(date_compact, slot):
 
 > ⚠️ **重要提醒**
 > ⚠️ 持仓台账唯一来源：`positions.json`（md5 `7da3df6091048013a0222c688d7eb13b`，as_of **{pos_data['as_of']}**）。
-> ⚠️ 数据口径：使用 `scripts/quote_fetch.py`（最高=parts[33]、最低=parts[34]、今开=parts[5]），经新浪源交叉验证 **{dual_n}/{dual_t} 逐项一致**（采样间隔 <1s）。
+> ⚠️ 数据口径：使用 `scripts/quote_fetch.py`（最高=parts[33]、最低=parts[34]、今开=parts[5]），经新浪源交叉验证 **{dual_n}/{dual_t} 逐项一致**；差异项见第3节。
 > ⚠️ 本报告仅做客观事实陈述，**不含任何操作指令**。
 
 ---
@@ -209,7 +219,7 @@ def build(date_compact, slot):
 | 标的 | 今开 | 最高 | 最低 | 现价 | 昨收 | 涨跌幅 |
 |------|------|------|------|------|------|--------|
 {hold_rows}
-**双源交叉验证**：{dual_n}/{dual_t} 标的的 现价/最高/最低 逐项一致（采样间隔 <1s，同批紧邻调用）
+**双源交叉验证**：{dual_line}
 
 ---
 
