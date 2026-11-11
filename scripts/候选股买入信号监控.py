@@ -12,6 +12,7 @@ import sys
 import fcntl
 import time
 import json
+import re
 import urllib.request
 from datetime import datetime
 import subprocess
@@ -29,6 +30,10 @@ TENCENT_MULTIDAY_URL = "https://web.ifzq.gtimg.cn/appstock/app/day/query?code={c
 # 同时点量比缓存（TTL 秒），避免每 30 秒都拉多日分时
 _SAME_TIME_VOL_CACHE = {}
 _SAME_TIME_VOL_TTL = 300
+
+# 买入提醒去重窗口（秒）。2026-11-09 由 300 改为 1800：
+# 原 5 分钟窗口导致每 5 分钟推一批、每批 4-5 条，实测 13:00-13:26 推了 4 批。
+ALERT_DEDUP_SEC = 1800
 
 # ============ 单实例锁定 ============
 def acquire_lock():
@@ -211,6 +216,149 @@ def load_sim_orders():
     return out
 
 
+def load_held_codes():
+    """读取模拟盘当前持仓代码集合
+
+    2026-11-09 修复：监控脚本只读 pending_orders，没有排除 positions，
+    导致已持仓标的（如 300623 捷捷微电）仍被反复推送「买入提醒」。
+    """
+    try:
+        with open(SIM_ORDERS_FILE, 'r', encoding='utf-8') as f:
+            d = json.load(f)
+    except Exception as e:
+        print(f"[持仓] 读取失败: {e}")
+        return set()
+    out = set()
+    for p in d.get('positions', []) or d.get('holdings', []) or []:
+        c = str(p.get('code', '')).strip()
+        if c:
+            out.add(c)
+    return out
+
+
+# ============ 趋势过滤（2026-11-09 新增）============
+# 背景：旧逻辑只有「价格进区间 + 缩量」两个条件，在下跌通道里「回踩+缩量」
+# 是最常见的形态，导致 9470 次提醒、0 次成交。必须加趋势门槛拦掉接飞刀信号。
+_TREND_CACHE = {}
+_TREND_TTL = 900  # 15分钟缓存，避免每30秒都拉K线
+
+
+def get_trend_info(code):
+    """取 MA20 及其斜率，判断是否处于上升趋势
+
+    返回 dict:
+      ma20        当前MA20（None=取数失败）
+      ma20_slope  MA20的10日变化率（%）
+      above_ma20  现价是否站上MA20
+      valid       数据是否有效（不足20根K线时为False）
+    """
+    import requests
+    key = code
+    now = time.time()
+    cached = _TREND_CACHE.get(key)
+    if cached and now - cached[0] < _TREND_TTL:
+        return cached[1]
+
+    result = {'ma20': None, 'ma20_slope': None, 'above_ma20': False, 'valid': False}
+    try:
+        symbol = f'sh{code}' if code.startswith(('5', '6', '7', '9')) else f'sz{code}'
+        url = (f'http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/'
+               f'CN_MarketData.getKLineData?symbol={symbol}&scale=240&ma=5')
+        resp = requests.get(url, timeout=15)
+        data = resp.json()
+        closes = [float(x['close']) for x in data]
+        if len(closes) >= 30:
+            ma20 = sum(closes[-20:]) / 20
+            ma20_prev = sum(closes[-30:-10]) / 20
+            result['ma20'] = round(ma20, 3)
+            result['ma20_slope'] = round((ma20 / ma20_prev - 1) * 100, 2) if ma20_prev > 0 else None
+            result['valid'] = True
+    except Exception as e:
+        print(f"[趋势] 获取{code}失败: {e}")
+
+    _TREND_CACHE[key] = (now, result)
+    return result
+
+
+def check_trend_gate(code, price, label=''):
+    """趋势门槛：拒绝接飞刀
+
+    判定规则（2026-11-09）：
+      1. 必须站上 MA20 —— 未站上一律拒绝（下行通道中“回踩+缩量”是最常见形态）
+      2. 且满足其一：
+         a. MA20 斜率 >= 0（均线本身走平/上行，趋势已确认）
+         b. 现价高于 MA20 达 5% 以上（均线仍微跌但股价强势收复，属反转初期）
+
+    返回 (成立与否, 说明文字)。取数失败时返回 None（无法判定）。
+    """
+    t = get_trend_info(code)
+    if not t['valid'] or t['ma20'] is None:
+        return None, f"{label}趋势维度无法判定（K线数据不足）"
+    ma20 = t['ma20']
+    slope = t['ma20_slope']
+    above = price >= ma20
+    dist = (price / ma20 - 1) * 100
+    if not above:
+        return False, (f"MA20={ma20:.2f}(斜率{slope:+.1f}%) "
+                       f"现价{price:.2f}未站上MA20（偏离{dist:+.1f}%）→ 下跌通道，拒绝接飞刀")
+    if slope is not None and slope >= 0:
+        return True, f"MA20={ma20:.2f} 斜率{slope:+.1f}% 现价{price:.2f}站上MA20（{dist:+.1f}%）→ 趋势确认"
+    if dist >= 5.0:
+        return True, (f"MA20={ma20:.2f} 斜率{slope:+.1f}% 现价{price:.2f}站上MA20（{dist:+.1f}%）"
+                       f"→ 强势收复（超MA20 5%以上）")
+    return False, (f"MA20={ma20:.2f} 斜率{slope:+.1f}% 现价{price:.2f}站上MA20但仅{dist:+.1f}% "
+                   f"→ 均线仍下行，未确认反转")
+
+
+def load_latest_zones():
+    """从最新一天的候选股评估 JSON 读取买入区间，覆盖硬编码 WATCHLIST
+
+    2026-11-09 修复：WATCHLIST 里的区间是 2026-11-05 收盘重算后写死的，
+    到 11-09 已过期 4 天。鼎胜新材当时跌穿下沿（区间 14.75，现价 13.98），
+    区间完全失效却还在参与判定 —— 属于用过期数据做决策。
+    这里改为每天重新评估后读取最新 JSON，区间随数据滚动。
+    """
+    base = "/home/YDL/.openclaw/workspace/a_stock_plan/daily"
+    try:
+        days = sorted([d for d in os.listdir(base) if re.match(r'^\d{4}-\d{2}-\d{2}$', d)], reverse=True)
+    except Exception as e:
+        print(f"[区间刷新] 读取日目录失败: {e}")
+        return {}, None
+
+    for day in days:
+        ddir = os.path.join(base, day)
+        try:
+            files = sorted([f for f in os.listdir(ddir) if f.startswith('候选股评估') and f.endswith('.json')],
+                           reverse=True)
+        except Exception:
+            continue
+        for fn in files:
+            path = os.path.join(ddir, fn)
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+            except Exception:
+                continue
+            zones = {}
+            for r in data:
+                c = str(r.get('code', ''))
+                if not c:
+                    continue
+                zones[c] = {
+                    'buy_low': r.get('buy_low'),
+                    'buy_high': r.get('buy_high'),
+                    'stop': r.get('stop'),
+                    'target_low': r.get('target_low'),
+                    'target_high': r.get('target_high'),
+                    'note': f"距MA20 {r.get('distance_ma20', 0):+.1f}%",
+                    'ma20': r.get('ma20'),
+                }
+            if zones:
+                print(f"[区间刷新] 使用 {day}/{fn} 的 {len(zones)} 条区间")
+                return zones, f"{day}/{fn}"
+    return {}, None
+
+
 def get_day_low(code):
     """取当日最低价（腾讯分时序列），失败返回 None"""
     try:
@@ -367,6 +515,11 @@ def evaluate_gate(gate, code, price, day_low):
     if gtype == 'no_earnings_bomb':
         # 财报维度由风控/复盘批次核验，监控脚本不做财务请求（避免高频拉财报接口）
         return None, "无业绩雷维度由财报批次核验，监控脚本不重复拉取"
+    if gtype == 'trend_gate':
+        # 2026-11-09 新增：条件单可显式声明趋势门槛，避免「价格进区间+缩量」
+        # 在下跌通道里被当作买点（接飞刀）。规则与 check_trend_gate 一致。
+        ok, desc = check_trend_gate(code, price)
+        return ok, f"趋势门槛：{desc}"
     return None, f"未知门槛类型 {gtype}"
 
 
@@ -388,6 +541,9 @@ WATCHLIST = {
     '300623': {'name': '捷捷微电', 'buy_low': 24.76, 'buy_high': 29.04, 'stop': 23.52, 'target_low': 30.49, 'target_high': 31.96, 'note': '距MA20 -3.1%'},
     '002407': {'name': '多氟多', 'buy_low': 21.47, 'buy_high': 25.43, 'stop': 20.39, 'target_low': 26.7, 'target_high': 30.0, 'note': '距MA20 -2.8%'},
     '603379': {'name': '三美股份', 'buy_low': 47.02, 'buy_high': 48.43, 'stop': 44.67, 'target_low': 50.85, 'target_high': 53.02, 'note': '距MA20 +14.4%'},
+    # 2026-11-09 新增：光伏ETF（华泰柏瑞中证光伏产业）
+    # 区间锚定 MA20 与30日区间，不随现价漂移；趋势门槛由条件单 gates 显式声明
+    '515790': {'name': '光伏ETF华', 'buy_low': 0.7095, 'buy_high': 0.7395, 'stop': 0.674, 'target_low': 0.78, 'target_high': 0.825, 'note': 'MA20=0.718 斜率-5.3% 待确认反转'},
 }
 
 # ============ 已移除个股持仓监控 ============
@@ -446,7 +602,9 @@ def send_alert(msg):
     import urllib.request
     import json
     
-    # 去重检查：同一个消息5分钟内不重复发送
+    # 去重检查：同一个消息30分钟内不重复发送
+# 2026-11-09：原为 5 分钟，导致每 5 分钟推一批、每批 4-5 条，实际刷屏。
+# 拉长到 30 分钟，与风控检查节奏对齐。
     now = time.time()
     msg_hash = hashlib.md5(msg.encode()).hexdigest()
     cache_key = f'/tmp/watchlist_alert_cache_{msg_hash}'
@@ -454,7 +612,7 @@ def send_alert(msg):
     try:
         if os.path.exists(cache_key):
             last_time = float(open(cache_key).read().strip())
-            if now - last_time < 300:  # 5分钟内不重复
+            if now - last_time < ALERT_DEDUP_SEC:  # 默认30分钟内不重复
                 return
         open(cache_key, 'w').write(str(now))
         # 清理过期缓存（24小时前）
@@ -529,6 +687,26 @@ def check_watchlist():
     codes = list(WATCHLIST.keys())
     quotes = get_realtime(codes)
     sim_orders = load_sim_orders()
+    # 2026-11-09 修复：排除已持仓标的，避免「持仓中还在推买入提醒」
+    held = load_held_codes()
+    if held:
+        print(f"[持仓排除] 本轮跳过已持仓: {', '.join(sorted(held))}")
+
+    # 2026-11-09 修复：用最新评估 JSON 覆盖硬编码区间（区间随数据滚动，避免过期）
+    zones, zone_src = load_latest_zones()
+    if zones:
+        for c, z in zones.items():
+            if c in WATCHLIST and z.get('buy_low') and z.get('buy_high'):
+                WATCHLIST[c].update({
+                    'buy_low': z['buy_low'], 'buy_high': z['buy_high'],
+                    'stop': z.get('stop', WATCHLIST[c].get('stop')),
+                    'target_low': z.get('target_low', WATCHLIST[c].get('target_low')),
+                    'target_high': z.get('target_high', WATCHLIST[c].get('target_high')),
+                    'note': z.get('note', ''),
+                })
+        print(f"[区间刷新] 已用 {zone_src} 覆盖 {len(zones)} 条买入区间")
+    else:
+        print("[区间刷新] 未找到评估 JSON，沿用硬编码区间（可能已过期）")
 
     # 获取成交量数据（仅用于无模拟盘条件单的标的）
     try:
@@ -545,7 +723,15 @@ def check_watchlist():
         price = quotes[code]['price']
         name = info['name']
 
+        # 2026-11-09 修复：已持仓标的不再推买入提醒
+        if code in held:
+            print(f"[已持仓跳过] {name}({code}) 现价{price}")
+            continue
+
         # ============ 路径 A：模拟盘有条件单 → 按 gates 判定 ============
+        # 条件单以自身 gates 为唯一裁决口径（含 trend_gate），不再叠加全局趋势门槛，
+        # 否则条件单在趋势未反转时会永远等不到成交。技能 entry-band-construction 亦要求
+        # 「让趋势门槛决定 dips 是否算入场」，即由条件单显式声明，而非脚本全局拦截。
         if code in sim_orders:
             order = sim_orders[code]
             day_low = info.get('day_low')
@@ -588,6 +774,13 @@ def check_watchlist():
         buy_high = info['buy_high']
 
         if not (buy_low <= price <= buy_high):
+            continue
+
+        # 2026-11-09：路径B 同样需要趋势门槛（路径A 由条件单自带 gates 裁决）
+        # 下跌通道中「回踩+缩量」是最常见形态，无趋势过滤会持续误报接飞刀信号
+        trend_ok, trend_desc = check_trend_gate(code, price, name)
+        if trend_ok is False:
+            print(f"[趋势不通过] {name}({code}) 现价{price}｜{trend_desc}")
             continue
 
         stop = info['stop']
@@ -646,7 +839,7 @@ def main():
             
             for code, alert in alerts:
                 if code in last_alert_time:
-                    if (now - last_alert_time[code]).seconds < 300:
+                    if (now - last_alert_time[code]).seconds < ALERT_DEDUP_SEC:
                         continue
                 
                 print(f"\n{'='*50}")

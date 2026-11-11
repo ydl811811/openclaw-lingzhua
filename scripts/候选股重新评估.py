@@ -19,7 +19,7 @@ FEISHU_BOT_URL = "https://open.feishu.cn/open-apis/bot/v2/hook/fbfd7f01-878c-4ec
 FEISHU_SECRET = "9vXyEvLigZ70Ynw1YeUtI"
 
 # 候选股列表（从监控脚本读取）
-WATCHLIST_CODES = ['002475', '300552', '600552', '300613', '603876', '300623', '002407', '603379']
+WATCHLIST_CODES = ['002475', '300552', '600552', '300613', '603876', '300623', '002407', '603379', '515790']
 
 def get_realtime(codes):
     """获取实时价格"""
@@ -231,12 +231,12 @@ def main():
         print(report)
         print("="*60)
         
-        # 发送到飞书（校验返回码，失败不谎报成功）
-        sent = send_feishu(report)
-        if sent:
-            print("\n✅ 报告已发送到飞书")
-        else:
-            print("\n❌ 报告发送失败！请检查飞书 webhook 配置")
+        # 2026-11-09：不再推送飞书。
+        # 原逻辑每次收盘把 8 只候选股的评估表推到飞书，属于「高频候选股推送」，
+        # 与「模拟盘买卖只在当前会话通知」的口径冲突。
+        # 现在只落盘 JSON，监控脚本通过 load_latest_zones() 读取最新区间；
+        # 需要通知时由灵爪在当前会话汇总。
+        print("\nℹ️  已跳过飞书推送（2026-11-09 起只落盘，不刷屏）")
         
         # 保存结果到文件
         save_path = f"/home/YDL/.openclaw/workspace/a_stock_plan/daily/{datetime.now().strftime('%Y-%m-%d')}/候选股评估_{datetime.now().strftime('%Y%m%d_%H%M')}.json"
